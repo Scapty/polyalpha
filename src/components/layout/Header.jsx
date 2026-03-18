@@ -3,15 +3,12 @@ import { hasApiKey } from "../../utils/aiAgent";
 import ApiKeyModal from "../shared/ApiKeyModal";
 
 const tabs = [
-  { id: "markets", label: "Markets" },
-  { id: "analytics", label: "Analytics" },
-  { id: "reports", label: "Reports" },
-  { id: "wallet-stalker", label: "Wallet Stalker", isNew: true },
-  { id: "copy-bot", label: "Copy Bot", isNew: true },
-  { id: "bot-leaderboard", label: "Bot Leaderboard", isNew: true },
+  { id: "wallet-stalker", label: "Wallet Stalker" },
+  { id: "bot-leaderboard", label: "Bot Leaderboard" },
+  { id: "arbitrage-scanner", label: "Arbitrage Scanner" },
 ];
 
-export default function Header({ activeTab, onTabChange, isLive }) {
+export default function Header({ activeTab, onTabChange }) {
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [hasKey, setHasKey] = useState(hasApiKey());
 
@@ -41,17 +38,6 @@ export default function Header({ activeTab, onTabChange, isLive }) {
           <span style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>
             PolyAlpha
           </span>
-          <div
-            className="badge"
-            style={{
-              background: isLive ? "var(--accent-dim)" : "var(--warning-dim)",
-              color: isLive ? "var(--accent)" : "var(--warning)",
-              marginLeft: 4,
-            }}
-          >
-            <span style={{ width: 5, height: 5, borderRadius: "50%", background: "currentColor", animation: isLive ? "pulse-glow 2s infinite" : "none" }} />
-            {isLive ? "LIVE" : "DEMO"}
-          </div>
         </div>
 
         {/* Tabs */}
@@ -78,22 +64,6 @@ export default function Header({ activeTab, onTabChange, isLive }) {
               }}
             >
               {tab.label}
-              {tab.isNew && (
-                <span
-                  style={{
-                    fontSize: 9,
-                    fontFamily: "var(--font-mono)",
-                    fontWeight: 700,
-                    padding: "1px 5px",
-                    borderRadius: 4,
-                    background: "var(--accent-dim)",
-                    color: "var(--accent)",
-                    letterSpacing: "0.05em",
-                  }}
-                >
-                  NEW
-                </span>
-              )}
               {activeTab === tab.id && (
                 <div
                   style={{

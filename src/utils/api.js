@@ -1,5 +1,3 @@
-import { mockMarkets } from "../data/mockMarkets";
-
 // --- API Endpoints ---
 // In dev: Vite proxy rewrites /api/* paths
 // In prod (Vercel): serverless functions at /api/*
@@ -55,8 +53,31 @@ export async function fetchMarkets() {
     setCache(cacheKey, result);
     return result;
   } catch (err) {
-    console.warn("Polymarket API unavailable, using demo data:", err.message);
-    return { markets: mockMarkets, isLive: false };
+    console.warn("Polymarket API unavailable:", err.message);
+    return { markets: [], isLive: false };
+  }
+}
+
+// --- All Markets (for arbitrage scanner — larger batch, shorter cache) ---
+const SCANNER_CACHE_TTL = 30 * 1000; // 30 seconds
+
+export async function fetchAllMarkets(limit = 500) {
+  const cacheKey = `all-markets:${limit}`;
+  const entry = cache.get(cacheKey);
+  if (entry && Date.now() - entry.ts < SCANNER_CACHE_TTL) return entry.data;
+
+  try {
+    const res = await fetchWithRetry(
+      `${MARKETS_API}?limit=${limit}&active=true&closed=false`
+    );
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) throw new Error("Empty response");
+    const result = { markets: data, isLive: true };
+    cache.set(cacheKey, { data: result, ts: Date.now() });
+    return result;
+  } catch (err) {
+    console.warn("Polymarket API unavailable for scanner:", err.message);
+    return { markets: [], isLive: false };
   }
 }
 
