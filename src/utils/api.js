@@ -345,8 +345,8 @@ export async function fetchTraderProfile(address) {
   if (cached) return cached;
 
   try {
-    // No timePeriod = all-time stats (most accurate)
-    const res = await fetchWithRetry(`${LEADERBOARD_API}?user=${address}`);
+    // timePeriod=ALL required — omitting it returns [] (API quirk)
+    const res = await fetchWithRetry(`${LEADERBOARD_API}?user=${address}&timePeriod=ALL`);
     const data = await res.json();
     if (!Array.isArray(data) || data.length === 0) throw new Error("No profile found");
     const p = data[0];
