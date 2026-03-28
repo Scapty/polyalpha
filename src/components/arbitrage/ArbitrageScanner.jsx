@@ -438,9 +438,22 @@ Respond ONLY in valid JSON:
   // ═══ RENDER ═══
   return (
     <div style={{ animation: "fadeInUp 0.5s var(--ease-out)", maxWidth: 820, margin: "0 auto" }}>
-      <div style={{ textAlign: "center", marginBottom: 40, paddingTop: 20 }}>
+      <div style={{ textAlign: "center", marginBottom: 28, paddingTop: 20 }}>
         <h1 style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 700, margin: "0 0 8px" }}>Odds Analyzer</h1>
         <p style={{ color: "var(--text-muted)", fontSize: 15 }}>Paste a market link — compare every outcome across platforms</p>
+      </div>
+
+      {/* Warning banner */}
+      <div style={{
+        marginBottom: 28, padding: "12px 16px", borderRadius: 12,
+        background: "rgba(255,170,0,0.08)", border: "1px solid rgba(255,170,0,0.25)",
+        display: "flex", alignItems: "flex-start", gap: 10,
+      }}>
+        <span style={{ fontSize: 16, flexShrink: 0 }}>⚠️</span>
+        <div style={{ fontSize: 13, color: "#ffcc00", lineHeight: 1.5 }}>
+          <strong>Price differences usually reflect different resolution conditions</strong> — different deadlines, sources, or criteria.
+          This is <em>not</em> arbitrage. Always verify the resolution rules on both platforms before trading.
+        </div>
       </div>
 
       {/* INPUT */}
@@ -523,7 +536,7 @@ Respond ONLY in valid JSON:
                 <span style={{ fontSize: 16 }}>⚠️</span>
                 <div style={{ fontSize: 12, color: "#ffcc00", lineHeight: 1.4 }}>
                   <strong>These bets are similar but NOT identical.</strong> Resolution conditions, deadlines or triggers may differ.
-                  Check the AI Analysis below before trading. Arbitrage calculations are disabled for non-identical bets.
+                  Check the AI Analysis below before trading. Price comparison is shown but these are different bets.
                 </div>
               </div>
             )}
@@ -707,7 +720,7 @@ function ArbitrageEducation({ outcomes }) {
         color: "#ffaa00",
       }}>
         <span style={{ fontWeight: 600, fontSize: 14 }}>
-          ⚡ Arbitrage Opportunity? — {best.outcome}
+          💰 Price Comparison — {best.outcome}
         </span>
         <span style={{ fontSize: 12 }}>{open ? "▲" : "▼"}</span>
       </button>
