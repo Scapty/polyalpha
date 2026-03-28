@@ -49,17 +49,14 @@ const CustomTooltip = ({ active, payload }) => {
   );
 };
 
-const TRADE_OPTIONS = [10, 25, 50, 100];
-
 export default function CopyTradingSimulator({ trades, traderName, marketResolutions, resolutionsLoading }) {
   const [initialAmount, setInitialAmount] = useState(1000);
-  const [numTrades, setNumTrades] = useState(50);
   const [result, setResult] = useState(null);
 
   if (!trades || trades.length < 5) return null;
 
   function handleRun() {
-    const sim = simulateWalletCopyTrading(trades, initialAmount, numTrades, marketResolutions || new Map());
+    const sim = simulateWalletCopyTrading(trades, initialAmount, marketResolutions || new Map());
     if (sim.numTrades === 0) {
       setResult({ ...sim, _noClosedTrades: true });
     } else {
@@ -83,7 +80,7 @@ export default function CopyTradingSimulator({ trades, traderName, marketResolut
         Copy Trading Simulator
       </h3>
       <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
-        Simulates copying {traderName || "this trader"}'s <b>closed positions</b> — manual exits + market resolutions
+        Simulates copying {traderName || "this trader"}'s <b>closed positions</b> — manual exits + market resolutions, in chronological order
         {resolutionsLoading && (
           <span style={{ marginLeft: 8, color: "var(--accent)", fontStyle: "italic" }}>
             (loading resolutions…)
@@ -133,43 +130,6 @@ export default function CopyTradingSimulator({ trades, traderName, marketResolut
               outline: "none",
             }}
           />
-        </div>
-
-        <div>
-          <label
-            style={{
-              display: "block",
-              fontSize: 10,
-              fontFamily: "var(--font-mono)",
-              color: "var(--text-muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              marginBottom: 4,
-            }}
-          >
-            Recent Trades
-          </label>
-          <div style={{ display: "flex", gap: 4 }}>
-            {TRADE_OPTIONS.map((n) => (
-              <button
-                key={n}
-                onClick={() => setNumTrades(n)}
-                style={{
-                  padding: "8px 14px",
-                  background: numTrades === n ? "rgba(139,92,246,0.15)" : "var(--bg-surface)",
-                  border: `1px solid ${numTrades === n ? "rgba(139,92,246,0.4)" : "var(--border-subtle)"}`,
-                  borderRadius: "var(--radius-sm)",
-                  color: numTrades === n ? "#8b5cf6" : "var(--text-secondary)",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 12,
-                  cursor: "pointer",
-                  transition: "all 0.2s",
-                }}
-              >
-                {n}
-              </button>
-            ))}
-          </div>
         </div>
 
         <button
@@ -224,7 +184,7 @@ export default function CopyTradingSimulator({ trades, traderName, marketResolut
               },
               {
                 label: "Closed Trades",
-                value: `${result.numTrades}${result.totalClosedTrades > result.numTrades ? ` / ${result.totalClosedTrades}` : ""}`,
+                value: `${result.numTrades}`,
                 color: "var(--text-muted)",
               },
               {
@@ -322,7 +282,7 @@ export default function CopyTradingSimulator({ trades, traderName, marketResolut
           >
             {result._noClosedTrades
               ? "No closed positions found in the available data. Try again once market resolutions finish loading, or this wallet may have no resolved markets in their last 1,000 trades."
-              : `Simulation based on ${result.numTrades} closed positions (${result.resolutionTrades} market resolutions + ${result.pairTrades} manual exits). Past performance does not guarantee future results.`}
+              : `Simulation based on ${result.numTrades} closed positions in chronological order (${result.resolutionTrades} market resolutions + ${result.pairTrades} manual exits). Past performance does not guarantee future results.`}
           </p>
         </div>
       )}

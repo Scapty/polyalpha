@@ -318,10 +318,10 @@ export async function fetchMarketResolutions(trades) {
   for (let i = 0; i < toFetch.length; i += BATCH) {
     const batch = toFetch.slice(i, i + BATCH);
     const results = await Promise.allSettled(
-      batch.map(async ({ asset }) => {
+      batch.map(async ({ asset, conditionId }) => {
         const cacheKey = `mkt-res:${asset}`;
         const cached = getCached(cacheKey);
-        if (cached) return { asset, ...cached };
+        if (cached) return { asset, conditionId, ...cached };
 
         try {
           const res = await fetch(`${MARKETS_API}?clob_token_ids=${asset}`);
@@ -352,9 +352,9 @@ export async function fetchMarketResolutions(trades) {
             endDate: mkt.endDateIso || mkt.endDate || null,
           };
           setCache(cacheKey, entry);
-          return { asset, ...entry };
+          return { asset, conditionId, ...entry };
         } catch {
-          return { asset, settlementPrice: null, closed: false };
+          return { asset, conditionId, settlementPrice: null, closed: false };
         }
       })
     );
@@ -362,6 +362,9 @@ export async function fetchMarketResolutions(trades) {
     for (const r of results) {
       if (r.status === "fulfilled" && r.value?.asset) {
         resolutionMap.set(r.value.asset, r.value);
+        // Also index by conditionId so extractResolutionTrades can find it
+        // even when the asset stored in byMarket differs from the fetched asset
+        if (r.value.conditionId) resolutionMap.set(r.value.conditionId, r.value);
       }
     }
 

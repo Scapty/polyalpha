@@ -83,7 +83,8 @@ function extractResolutionTrades(trades, marketResolutions, pairConditionIds) {
 
   const closed = [];
   for (const { conditionId, title, asset, buys } of Object.values(byMarket)) {
-    const resolution = marketResolutions.get(asset);
+    // Try asset first, fall back to conditionId (handles token ID mismatch between fetch and group)
+    const resolution = marketResolutions.get(asset) || (conditionId ? marketResolutions.get(conditionId) : null);
     if (!resolution || resolution.settlementPrice === null) continue;
 
     let totalSize = 0;
@@ -139,29 +140,29 @@ function estimateSlippage(tradeSize, price) {
 /**
  * @param {Array}  trades            - Raw trade objects from Data API
  * @param {number} initialAmount     - Starting capital
- * @param {number} maxTrades         - Most recent N closed trades to simulate
  * @param {Map}    marketResolutions - From fetchMarketResolutions(); empty Map = pairs only
  */
 export function simulateWalletCopyTrading(
   trades,
   initialAmount = 1000,
-  maxTrades = 50,
   marketResolutions = new Map()
 ) {
   if (!trades || trades.length === 0) return emptyResult(initialAmount);
 
   const pairTrades = extractPairTrades(trades);
+  // Only exclude by conditionId — title-based exclusion causes false negatives
   const pairConditionIds = new Set(pairTrades.map((t) => t.conditionId).filter(Boolean));
-  pairTrades.forEach((t) => { if (t.market) pairConditionIds.add(t.market); });
 
   const resolutionTrades = extractResolutionTrades(trades, marketResolutions, pairConditionIds);
 
+  // Sort oldest-first so the equity curve plays out chronologically
   const allClosed = [...pairTrades, ...resolutionTrades]
     .sort((a, b) => (a.sellTime || 0) - (b.sellTime || 0));
 
   if (allClosed.length === 0) return emptyResult(initialAmount);
 
-  const recentClosed = allClosed.slice(-maxTrades);
+  // Use all closed trades (oldest → newest)
+  const recentClosed = allClosed;
 
   let equity = initialAmount;
   let peak = initialAmount;
