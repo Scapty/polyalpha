@@ -274,6 +274,28 @@ export async function fetchWalletTrades(address, limit = 1000) {
   }
 }
 
+// --- Wallet Positions (open + recently resolved positions with real P&L) ---
+export async function fetchWalletPositions(address) {
+  const cacheKey = `wallet-positions:${address}`;
+  // Short cache — positions change as prices move
+  const entry = cache.get(cacheKey);
+  if (entry && Date.now() - entry.ts < 60_000) return entry.data;
+
+  try {
+    const res = await fetchWithRetry(
+      `/api/data-positions?user=${address}&limit=500&sizeThreshold=.01`
+    );
+    const data = await res.json();
+    if (!Array.isArray(data)) throw new Error("No positions data");
+    const result = { positions: data, isLive: true };
+    cache.set(cacheKey, { data: result, ts: Date.now() });
+    return result;
+  } catch (err) {
+    console.warn("Positions API failed:", err.message);
+    return { positions: [], isLive: false };
+  }
+}
+
 // --- Wallet Activity (redemptions, merges, etc.) ---
 export async function fetchWalletActivity(address, limit = 100) {
   const cacheKey = `wallet-activity:${address}:${limit}`;
@@ -314,25 +336,28 @@ export async function fetchLeaderboard(limit = 20) {
   }
 }
 
-// --- Trader Profile (from leaderboard by address) ---
+// --- Trader Profile (all-time stats from leaderboard by address) ---
+// NOTE: /leaderboard?user={address} returns all-time PnL and volume — accurate data
+// The weekly leaderboard (?timePeriod=WEEK) is unreliable for individual wallets
 export async function fetchTraderProfile(address) {
   const cacheKey = `profile:${address}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
   try {
+    // No timePeriod = all-time stats (most accurate)
     const res = await fetchWithRetry(`${LEADERBOARD_API}?user=${address}`);
     const data = await res.json();
     if (!Array.isArray(data) || data.length === 0) throw new Error("No profile found");
-    const profile = data[0];
+    const p = data[0];
     const result = {
       profile: {
-        rank: profile.rank,
-        userName: profile.userName || "Anonymous",
-        pnl: profile.pnl || 0,
-        volume: profile.vol || 0,
-        profileImage: profile.profileImage || "",
-        wallet: profile.proxyWallet || address,
+        rank: p.rank ? `#${p.rank}` : null,
+        userName: p.userName || null,
+        pnl: typeof p.pnl === "number" ? p.pnl : null,
+        volume: typeof p.vol === "number" ? p.vol : null,
+        profileImage: p.profileImage || "",
+        wallet: p.proxyWallet || address,
       },
       isLive: true,
     };

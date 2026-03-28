@@ -41,6 +41,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/kalshi\/events/, '/trade-api/v2/events'),
       },
+      '/api/data-positions': {
+        target: 'https://data-api.polymarket.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/data-positions/, '/positions'),
+      },
     },
   },
 })

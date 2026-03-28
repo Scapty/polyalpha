@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import { fetchWalletTrades, fetchTraderProfile } from "../../utils/api";
+import { fetchWalletTrades, fetchTraderProfile, fetchWalletPositions } from "../../utils/api";
 import { calculateBotScore } from "../../utils/botScoring";
 import WalletInput from "./WalletInput";
 import BotScoreGauge from "./BotScoreGauge";
@@ -22,6 +22,7 @@ export default function WalletStalker() {
   const [profile, setProfile] = useState(null);
   const [showAllTrades, setShowAllTrades] = useState(false);
   const [traderName, setTraderName] = useState(null);
+  const [positions, setPositions] = useState([]);
 
   const lastAnalyzedRef = useRef("");
 
@@ -45,21 +46,26 @@ export default function WalletStalker() {
     setProfile(null);
     setShowAllTrades(false);
     setTraderName(null);
+    setPositions([]);
 
     try {
-      const [tradesResult, profileResult] = await Promise.all([
+      const [tradesResult, profileResult, positionsResult] = await Promise.all([
         fetchWalletTrades(walletAddr.trim()),
         fetchTraderProfile(walletAddr.trim()),
+        fetchWalletPositions(walletAddr.trim()),
       ]);
 
       setTrades(tradesResult.trades);
       setIsLive(tradesResult.isLive);
       setError(tradesResult.error);
       setProfile(profileResult.profile);
+      setPositions(positionsResult.positions);
 
-      if (tradesResult.trades.length > 0 && tradesResult.trades[0].traderName) {
-        setTraderName(tradesResult.trades[0].traderName);
-      }
+      // Name: prefer leaderboard username, fall back to first trade name
+      const name =
+        profileResult.profile?.userName ||
+        (tradesResult.trades.length > 0 ? tradesResult.trades[0].name : null);
+      if (name) setTraderName(name);
 
       if (tradesResult.trades.length >= 5) {
         const analysis = calculateBotScore(tradesResult.trades);
@@ -89,7 +95,7 @@ export default function WalletStalker() {
   const displayedTrades = showAllTrades ? trades : trades.slice(0, 25);
 
   // Compute overview stats from trades + profile
-  const overviewStats = trades.length > 0 ? computeOverviewStats(trades, profile) : null;
+  const overviewStats = trades.length > 0 ? computeOverviewStats(trades, profile, positions) : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
@@ -245,6 +251,21 @@ export default function WalletStalker() {
                 }}
               >
                 {traderName}
+              </span>
+            )}
+            {profile?.rank && (
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  color: "var(--accent)",
+                  background: "rgba(0,212,170,0.08)",
+                  border: "1px solid rgba(0,212,170,0.2)",
+                  borderRadius: 4,
+                  padding: "2px 8px",
+                }}
+              >
+                {profile.rank} all-time
               </span>
             )}
             <span
@@ -616,7 +637,7 @@ function analyzeClosedTrades(trades) {
 }
 
 // Compute overview statistics — ONLY show what we can verify from API data
-function computeOverviewStats(trades, profile) {
+function computeOverviewStats(trades, profile, positions = []) {
   const uniqueMarkets = new Set(trades.map((t) => t.title || t.conditionId)).size;
 
   const timestamps = trades
@@ -645,28 +666,83 @@ function computeOverviewStats(trades, profile) {
   const buys = trades.filter((t) => (t.side || "").toUpperCase() === "BUY").length;
   const sells = trades.filter((t) => (t.side || "").toUpperCase() === "SELL").length;
 
-  // Volume: calculate from trade data (sum of size × price) — reliable
-  const tradeVolume = trades.reduce((sum, t) => sum + (parseFloat(t.size) || 0) * (parseFloat(t.price) || 0), 0);
-  const volStr = tradeVolume >= 1_000_000 ? `$${(tradeVolume / 1_000_000).toFixed(1)}M` : `$${Math.round(tradeVolume).toLocaleString()}`;
+  // Volume from leaderboard (all-time, most accurate) if available
+  // Otherwise fall back to sum of size×price across available trades
+  let volStr = null;
+  if (profile?.volume && profile.volume > 0) {
+    const v = profile.volume;
+    volStr = v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` : `$${Math.round(v).toLocaleString()}`;
+  } else {
+    const tradeVol = trades.reduce((sum, t) => sum + (parseFloat(t.size) || 0) * (parseFloat(t.price) || 0), 0);
+    if (tradeVol > 0) {
+      volStr = tradeVol >= 1_000_000 ? `$${(tradeVol / 1_000_000).toFixed(1)}M` : `$${Math.round(tradeVol).toLocaleString()}`;
+    }
+  }
+  const volSubtext = profile?.volume
+    ? "all-time (Polymarket leaderboard)"
+    : trades.length >= 1000 ? "from last 1,000 trades" : null;
+
+  // All-time P&L from leaderboard — real data from Polymarket
+  let pnlStr = null;
+  let pnlColor = null;
+  if (profile?.pnl != null) {
+    const p = profile.pnl;
+    pnlStr = p >= 0
+      ? `+$${p >= 1_000_000 ? (p / 1_000_000).toFixed(2) + "M" : Math.round(p).toLocaleString()}`
+      : `-$${Math.abs(p) >= 1_000_000 ? (Math.abs(p) / 1_000_000).toFixed(2) + "M" : Math.round(Math.abs(p)).toLocaleString()}`;
+    pnlColor = p >= 0 ? "var(--accent)" : "var(--negative)";
+  }
+
+  // Open positions from /positions endpoint
+  const openPositions = positions.filter((p) => p.curPrice > 0 && !p.redeemable);
+  const unrealizedPnl = openPositions.reduce((sum, p) => sum + (p.cashPnl || 0), 0);
+  const openPortfolioValue = openPositions.reduce((sum, p) => sum + (p.currentValue || 0), 0);
 
   const tradeLabel = trades.length >= 1000 ? "1,000+" : trades.length.toLocaleString();
-  const winRateColor = analysis.winRate !== null ? (analysis.winRate >= 55 ? "var(--accent)" : analysis.winRate <= 45 ? "var(--negative)" : "var(--text-primary)") : null;
+  const winRateColor = analysis.winRate !== null
+    ? (analysis.winRate >= 55 ? "var(--accent)" : analysis.winRate <= 45 ? "var(--negative)" : "var(--text-primary)")
+    : null;
 
   const stats = [
-    { label: "Total Trades", value: tradeLabel, subtext: trades.length >= 1000 ? "API limit — showing last 1,000" : null },
-    { label: "Volume", value: volStr, subtext: trades.length >= 1000 ? "in last 1,000 trades" : null },
-    { label: "Buy / Sell", value: `${buys} / ${sells}`, subtext: sells === 0 ? "no sells — mostly open positions" : null },
-    { label: "Markets Traded", value: uniqueMarkets },
-    { label: "Data Window", value: dataWindow, subtext: "span of available trades" },
+    { label: "Total Trades", value: tradeLabel, subtext: trades.length >= 1000 ? "API limit — last 1,000 shown" : null },
   ];
 
-  // Only show win rate if we have enough closed pairs
+  if (volStr) {
+    stats.push({ label: "Volume", value: volStr, subtext: volSubtext });
+  }
+
+  // All-time P&L (only from leaderboard — real Polymarket data)
+  if (pnlStr) {
+    stats.push({ label: "All-Time P&L", value: pnlStr, color: pnlColor, subtext: "Polymarket leaderboard" });
+  }
+
+  stats.push({ label: "Buy / Sell", value: `${buys} / ${sells}`, subtext: sells === 0 ? "holds to resolution" : null });
+  stats.push({ label: "Markets Traded", value: uniqueMarkets });
+  stats.push({ label: "Data Window", value: dataWindow, subtext: "span of available trades" });
+
+  // Open portfolio (from positions endpoint — real-time)
+  if (openPositions.length > 0) {
+    const portVal = openPortfolioValue >= 1_000_000
+      ? `$${(openPortfolioValue / 1_000_000).toFixed(2)}M`
+      : `$${Math.round(openPortfolioValue).toLocaleString()}`;
+    const unrealStr = unrealizedPnl >= 0
+      ? `+$${Math.round(Math.abs(unrealizedPnl)).toLocaleString()}`
+      : `-$${Math.round(Math.abs(unrealizedPnl)).toLocaleString()}`;
+    stats.push({
+      label: "Open Positions",
+      value: portVal,
+      color: unrealizedPnl >= 0 ? "var(--accent)" : "var(--negative)",
+      subtext: `${openPositions.length} open · unrealized ${unrealStr}`,
+    });
+  }
+
+  // Win rate from closed buy→sell pairs
   if (analysis.winRate !== null) {
     stats.push({
       label: "Win Rate",
       value: `${analysis.winRate}%`,
       color: winRateColor,
-      subtext: `${analysis.wins}W / ${analysis.losses}L from ${analysis.total} closed trades`,
+      subtext: `${analysis.wins}W / ${analysis.losses}L (${analysis.total} closed pairs)`,
     });
   }
 
