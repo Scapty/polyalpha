@@ -51,7 +51,7 @@ const CustomTooltip = ({ active, payload }) => {
 
 const TRADE_OPTIONS = [10, 25, 50, 100];
 
-export default function CopyTradingSimulator({ trades, traderName }) {
+export default function CopyTradingSimulator({ trades, traderName, marketResolutions, resolutionsLoading }) {
   const [initialAmount, setInitialAmount] = useState(1000);
   const [numTrades, setNumTrades] = useState(50);
   const [result, setResult] = useState(null);
@@ -59,7 +59,7 @@ export default function CopyTradingSimulator({ trades, traderName }) {
   if (!trades || trades.length < 5) return null;
 
   function handleRun() {
-    const sim = simulateWalletCopyTrading(trades, initialAmount, numTrades);
+    const sim = simulateWalletCopyTrading(trades, initialAmount, numTrades, marketResolutions || new Map());
     if (sim.numTrades === 0) {
       setResult({ ...sim, _noClosedTrades: true });
     } else {
@@ -83,7 +83,12 @@ export default function CopyTradingSimulator({ trades, traderName }) {
         Copy Trading Simulator
       </h3>
       <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
-        Simulates copying {traderName || "this trader"}'s <b>closed trades only</b> (completed buy→sell pairs)
+        Simulates copying {traderName || "this trader"}'s <b>closed positions</b> — manual exits + market resolutions
+        {resolutionsLoading && (
+          <span style={{ marginLeft: 8, color: "var(--accent)", fontStyle: "italic" }}>
+            (loading resolutions…)
+          </span>
+        )}
       </p>
 
       {/* Config row */}
@@ -170,9 +175,10 @@ export default function CopyTradingSimulator({ trades, traderName }) {
         <button
           className="btn-primary"
           onClick={handleRun}
+          disabled={resolutionsLoading}
           style={{ padding: "8px 24px", whiteSpace: "nowrap" }}
         >
-          Run Simulation
+          {resolutionsLoading ? "Loading data…" : "Run Simulation"}
         </button>
       </div>
 
@@ -315,8 +321,8 @@ export default function CopyTradingSimulator({ trades, traderName }) {
             }}
           >
             {result._noClosedTrades
-              ? "This trader has no completed buy→sell pairs in the available data. Most positions are still open — simulation requires closed trades."
-              : `Simulation based on ${result.numTrades} closed trades (completed buy→sell pairs). Open positions are excluded. Past performance does not guarantee future results.`}
+              ? "No closed positions found in the available data. Try again once market resolutions finish loading, or this wallet may have no resolved markets in their last 1,000 trades."
+              : `Simulation based on ${result.numTrades} closed positions (${result.resolutionTrades} market resolutions + ${result.pairTrades} manual exits). Past performance does not guarantee future results.`}
           </p>
         </div>
       )}

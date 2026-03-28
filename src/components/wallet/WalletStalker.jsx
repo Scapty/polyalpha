@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import { fetchWalletTrades, fetchTraderProfile, fetchWalletPositions } from "../../utils/api";
+import { fetchWalletTrades, fetchTraderProfile, fetchWalletPositions, fetchMarketResolutions } from "../../utils/api";
 import { calculateBotScore } from "../../utils/botScoring";
 import WalletInput from "./WalletInput";
 import BotScoreGauge from "./BotScoreGauge";
@@ -23,6 +23,8 @@ export default function WalletStalker() {
   const [showAllTrades, setShowAllTrades] = useState(false);
   const [traderName, setTraderName] = useState(null);
   const [positions, setPositions] = useState([]);
+  const [marketResolutions, setMarketResolutions] = useState(new Map());
+  const [resolutionsLoading, setResolutionsLoading] = useState(false);
 
   const lastAnalyzedRef = useRef("");
 
@@ -47,6 +49,8 @@ export default function WalletStalker() {
     setShowAllTrades(false);
     setTraderName(null);
     setPositions([]);
+    setMarketResolutions(new Map());
+    setResolutionsLoading(false);
 
     try {
       const [tradesResult, profileResult, positionsResult] = await Promise.all([
@@ -76,6 +80,15 @@ export default function WalletStalker() {
           classification: "Insufficient Data",
           factors: [],
           stats: { totalTrades: tradesResult.trades.length },
+        });
+      }
+
+      // Fetch market resolutions in the background after main analysis completes
+      if (tradesResult.trades.length > 0) {
+        setResolutionsLoading(true);
+        fetchMarketResolutions(tradesResult.trades).then((resMap) => {
+          setMarketResolutions(resMap);
+          setResolutionsLoading(false);
         });
       }
     } catch (err) {
@@ -385,7 +398,12 @@ export default function WalletStalker() {
 
           {/* Section 5: Copy Trading Simulator */}
           {result.classification !== "Insufficient Data" && (
-            <CopyTradingSimulator trades={trades} traderName={traderName || "this trader"} />
+            <CopyTradingSimulator
+              trades={trades}
+              traderName={traderName || "this trader"}
+              marketResolutions={marketResolutions}
+              resolutionsLoading={resolutionsLoading}
+            />
           )}
 
           {/* Section 6: Track This Wallet */}

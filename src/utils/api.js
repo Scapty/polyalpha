@@ -296,6 +296,84 @@ export async function fetchWalletPositions(address) {
   }
 }
 
+// --- Market Resolutions (batch gamma fetch to determine win/loss for each trade) ---
+// Returns Map<assetId, {settlementPrice: 0|1|null, closed: bool, question: str, endDate: str}>
+export async function fetchMarketResolutions(trades) {
+  if (!trades || trades.length === 0) return new Map();
+
+  // One asset per unique conditionId (avoid fetching YES+NO token for same market)
+  const seen = new Set();
+  const toFetch = [];
+  for (const t of trades) {
+    const key = t.conditionId || t.asset;
+    if (t.asset && key && !seen.has(key)) {
+      seen.add(key);
+      toFetch.push({ asset: t.asset, conditionId: t.conditionId });
+    }
+  }
+
+  const BATCH = 15;
+  const resolutionMap = new Map();
+
+  for (let i = 0; i < toFetch.length; i += BATCH) {
+    const batch = toFetch.slice(i, i + BATCH);
+    const results = await Promise.allSettled(
+      batch.map(async ({ asset }) => {
+        const cacheKey = `mkt-res:${asset}`;
+        const cached = getCached(cacheKey);
+        if (cached) return { asset, ...cached };
+
+        try {
+          const res = await fetch(`${MARKETS_API}?clob_token_ids=${asset}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          if (!Array.isArray(data) || data.length === 0) throw new Error("Not found");
+
+          const mkt = data[0];
+          const prices = typeof mkt.outcomePrices === "string"
+            ? JSON.parse(mkt.outcomePrices)
+            : (mkt.outcomePrices || []);
+          const tokenIds = typeof mkt.clobTokenIds === "string"
+            ? JSON.parse(mkt.clobTokenIds)
+            : (mkt.clobTokenIds || []);
+
+          const idx = tokenIds.indexOf(asset);
+          const rawPrice = idx >= 0 && prices[idx] !== undefined ? parseFloat(prices[idx]) : null;
+
+          // Resolved = closed flag OR all prices are exactly 0 or 1
+          const allBinary = prices.length > 0 && prices.every((p) => parseFloat(p) <= 0.01 || parseFloat(p) >= 0.99);
+          const closed = mkt.closed === true || allBinary;
+          const settlementPrice = (closed && rawPrice !== null) ? rawPrice : null;
+
+          const entry = {
+            settlementPrice,
+            closed,
+            question: mkt.question || "",
+            endDate: mkt.endDateIso || mkt.endDate || null,
+          };
+          setCache(cacheKey, entry);
+          return { asset, ...entry };
+        } catch {
+          return { asset, settlementPrice: null, closed: false };
+        }
+      })
+    );
+
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value?.asset) {
+        resolutionMap.set(r.value.asset, r.value);
+      }
+    }
+
+    // Gentle rate-limit between batches
+    if (i + BATCH < toFetch.length) {
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+
+  return resolutionMap;
+}
+
 // --- Wallet Activity (redemptions, merges, etc.) ---
 export async function fetchWalletActivity(address, limit = 100) {
   const cacheKey = `wallet-activity:${address}:${limit}`;
