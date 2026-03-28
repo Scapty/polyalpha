@@ -14,6 +14,7 @@ import { simulateWalletCopyTrading } from "../../utils/walletCopyEngine";
 const CustomTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
+  const isProfit = d.isWin;
   return (
     <div
       style={{
@@ -23,17 +24,25 @@ const CustomTooltip = ({ active, payload }) => {
         padding: "10px 14px",
         fontSize: 12,
         fontFamily: "var(--font-mono)",
+        maxWidth: 260,
       }}
     >
-      <div style={{ color: "var(--text-muted)", marginBottom: 6 }}>Trade #{d.trade}</div>
+      {d.market && (
+        <div style={{ color: "var(--text-primary)", fontWeight: 600, marginBottom: 4, lineHeight: 1.3, fontSize: 11 }}>
+          {d.market.length > 60 ? d.market.slice(0, 57) + "…" : d.market}
+        </div>
+      )}
+      <div style={{ color: "var(--text-muted)", marginBottom: 6, fontSize: 10 }}>
+        {d.date ? d.date : `Trade #${d.trade}`}
+        {d.isWin !== undefined && (
+          <span style={{ marginLeft: 6, color: isProfit ? "#00d4aa" : "#ff4466", fontWeight: 700 }}>
+            {isProfit ? "WIN" : "LOSS"}
+          </span>
+        )}
+      </div>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
         <span style={{ color: "var(--text-muted)" }}>Equity</span>
-        <span
-          style={{
-            fontWeight: 600,
-            color: d.equity >= payload[0]?.payload?.initialAmount ? "#00d4aa" : "#ff4466",
-          }}
-        >
+        <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
           ${d.equity.toLocaleString()}
         </span>
       </div>
@@ -236,8 +245,12 @@ export default function CopyTradingSimulator({ trades, traderName, marketResolut
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis
                   dataKey="trade"
-                  tick={{ fontSize: 10 }}
-                  tickFormatter={(v) => (v % Math.ceil(result.numTrades / 5) === 0 ? `#${v}` : "")}
+                  tick={{ fontSize: 9 }}
+                  tickFormatter={(v) => {
+                    const point = result.equityCurve.find((p) => p.trade === v);
+                    return point?.date || "";
+                  }}
+                  interval={Math.max(0, Math.ceil(result.numTrades / 6) - 1)}
                 />
                 <YAxis
                   tick={{ fontSize: 10 }}

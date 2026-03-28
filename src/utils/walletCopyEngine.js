@@ -199,8 +199,12 @@ export function simulateWalletCopyTrading(
     const drawdown = ((peak - equity) / peak) * 100;
     maxDrawdown = Math.max(maxDrawdown, drawdown);
 
+    const d = trade.sellTime ? new Date(trade.sellTime) : null;
     equityCurve.push({
       trade: i + 1,
+      market: trade.market || "",
+      date: d ? d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "",
+      isWin: copyReturn > 0,
       equity: Math.round(equity * 100) / 100,
       drawdown: Math.round(drawdown * 100) / 100,
     });
