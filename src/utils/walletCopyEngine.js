@@ -67,24 +67,27 @@ function extractPairTrades(trades) {
 function extractResolutionTrades(trades, marketResolutions, pairConditionIds) {
   if (!marketResolutions || marketResolutions.size === 0) return [];
 
-  const byMarket = {};
+  // Group by asset (token ID) — not conditionId — because YES and NO tokens
+  // for the same market have DIFFERENT settlement prices (one 0, one 1).
+  // Grouping by conditionId would mix them and produce wrong P&L.
+  const byAsset = {};
   trades.forEach((t) => {
     const side = (t.side || "").toUpperCase();
     if (side !== "BUY" && side !== "B") return;
+    if (!t.asset) return;
 
-    const key = t.conditionId || t.title || "unknown";
-    if (pairConditionIds.has(key)) return; // already captured by pair-matching
+    const conditionKey = t.conditionId || t.title || "unknown";
+    if (pairConditionIds.has(conditionKey)) return; // already captured by pair-matching
 
-    if (!byMarket[key]) {
-      byMarket[key] = { conditionId: t.conditionId, title: t.title, asset: t.asset, buys: [] };
+    if (!byAsset[t.asset]) {
+      byAsset[t.asset] = { conditionId: t.conditionId, title: t.title, asset: t.asset, buys: [] };
     }
-    byMarket[key].buys.push(t);
+    byAsset[t.asset].buys.push(t);
   });
 
   const closed = [];
-  for (const { conditionId, title, asset, buys } of Object.values(byMarket)) {
-    // Try asset first, fall back to conditionId (handles token ID mismatch between fetch and group)
-    const resolution = marketResolutions.get(asset) || (conditionId ? marketResolutions.get(conditionId) : null);
+  for (const { conditionId, title, asset, buys } of Object.values(byAsset)) {
+    const resolution = marketResolutions.get(asset);
     if (!resolution || resolution.settlementPrice === null) continue;
 
     let totalSize = 0;

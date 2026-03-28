@@ -301,13 +301,13 @@ export async function fetchWalletPositions(address) {
 export async function fetchMarketResolutions(trades) {
   if (!trades || trades.length === 0) return new Map();
 
-  // One asset per unique conditionId (avoid fetching YES+NO token for same market)
+  // Deduplicate by asset (token ID) — YES and NO are different tokens with different
+  // settlement prices, so they must be fetched and stored separately.
   const seen = new Set();
   const toFetch = [];
   for (const t of trades) {
-    const key = t.conditionId || t.asset;
-    if (t.asset && key && !seen.has(key)) {
-      seen.add(key);
+    if (t.asset && !seen.has(t.asset)) {
+      seen.add(t.asset);
       toFetch.push({ asset: t.asset, conditionId: t.conditionId });
     }
   }
