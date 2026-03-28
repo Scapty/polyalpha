@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   AreaChart,
   Area,
@@ -61,25 +61,50 @@ const CustomTooltip = ({ active, payload }) => {
 export default function CopyTradingSimulator({ trades, positions, traderName, marketResolutions, resolutionsLoading }) {
   const [initialAmount, setInitialAmount] = useState(1000);
   const [result, setResult] = useState(null);
+  // Track whether user has clicked Run at least once, so we can auto-rerun
+  // when resolutions finish loading and improve the result.
+  const hasRun = useRef(false);
+  const prevResolutionsLoading = useRef(resolutionsLoading);
 
   if (!trades || trades.length < 5) return null;
 
-  function handleRun() {
+  function runSim(amount = initialAmount) {
     // Prefer positions-based simulation: uses Polymarket's own cashPnl data,
     // which correctly handles positions sold before resolution.
-    const posSim = simulateFromPositions(positions || [], initialAmount);
+    const posSim = simulateFromPositions(positions || [], amount);
     if (posSim && posSim.numTrades > 0) {
       setResult(posSim);
       return;
     }
-    // Fallback: reconstruct from trades + gamma resolution prices
-    const sim = simulateWalletCopyTrading(trades, initialAmount, marketResolutions || new Map());
+    // Fallback: reconstruct from trades + gamma resolution prices.
+    // Only run if resolutions are loaded (otherwise we'd get 0 resolution trades).
+    if (resolutionsLoading) {
+      // Show a placeholder result so the user knows a run is pending
+      setResult({ _pending: true });
+      return;
+    }
+    const sim = simulateWalletCopyTrading(trades, amount, marketResolutions || new Map());
     if (sim.numTrades === 0) {
       setResult({ ...sim, _noClosedTrades: true });
     } else {
       setResult(sim);
     }
   }
+
+  function handleRun() {
+    hasRun.current = true;
+    runSim();
+  }
+
+  // Auto-rerun when resolutions finish loading (if user already clicked Run)
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    if (prevResolutionsLoading.current && !resolutionsLoading && hasRun.current) {
+      runSim();
+    }
+    prevResolutionsLoading.current = resolutionsLoading;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolutionsLoading]);
 
   const isProfit = result && result.finalEquity >= result.initialAmount;
   const curveColor = isProfit ? "#00d4aa" : "#ff4466";
@@ -147,14 +172,22 @@ export default function CopyTradingSimulator({ trades, positions, traderName, ma
         <button
           className="btn-primary"
           onClick={handleRun}
+          disabled={resolutionsLoading && !((positions || []).some(p => p.redeemable))}
           style={{ padding: "8px 24px", whiteSpace: "nowrap" }}
         >
-          Run Simulation
+          {resolutionsLoading && !((positions || []).some(p => p.redeemable)) ? "Loading data…" : "Run Simulation"}
         </button>
       </div>
 
+      {/* Pending state — waiting for resolutions to load */}
+      {result?._pending && (
+        <div style={{ padding: "16px 0", fontSize: 12, color: "var(--accent)", fontStyle: "italic" }}>
+          Loading market resolution data… simulation will run automatically when ready.
+        </div>
+      )}
+
       {/* Results */}
-      {result && (
+      {result && !result._pending && (
         <div
           className="animate-fade-in"
           style={{ display: "flex", flexDirection: "column", gap: 16 }}
