@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
-import { simulateWalletCopyTrading } from "../../utils/walletCopyEngine";
+import { simulateWalletCopyTrading, simulateFromPositions } from "../../utils/walletCopyEngine";
 
 const CustomTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
@@ -58,13 +58,21 @@ const CustomTooltip = ({ active, payload }) => {
   );
 };
 
-export default function CopyTradingSimulator({ trades, traderName, marketResolutions, resolutionsLoading }) {
+export default function CopyTradingSimulator({ trades, positions, traderName, marketResolutions, resolutionsLoading }) {
   const [initialAmount, setInitialAmount] = useState(1000);
   const [result, setResult] = useState(null);
 
   if (!trades || trades.length < 5) return null;
 
   function handleRun() {
+    // Prefer positions-based simulation: uses Polymarket's own cashPnl data,
+    // which correctly handles positions sold before resolution.
+    const posSim = simulateFromPositions(positions || [], initialAmount);
+    if (posSim && posSim.numTrades > 0) {
+      setResult(posSim);
+      return;
+    }
+    // Fallback: reconstruct from trades + gamma resolution prices
     const sim = simulateWalletCopyTrading(trades, initialAmount, marketResolutions || new Map());
     if (sim.numTrades === 0) {
       setResult({ ...sim, _noClosedTrades: true });
@@ -89,12 +97,7 @@ export default function CopyTradingSimulator({ trades, traderName, marketResolut
         Copy Trading Simulator
       </h3>
       <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
-        Simulates copying {traderName || "this trader"}'s <b>closed positions</b> — manual exits + market resolutions, in chronological order
-        {resolutionsLoading && (
-          <span style={{ marginLeft: 8, color: "var(--accent)", fontStyle: "italic" }}>
-            (loading resolutions…)
-          </span>
-        )}
+        Simulates copying {traderName || "this trader"}'s <b>closed positions</b> using Polymarket P&amp;L data, in chronological order
       </p>
 
       {/* Config row */}
@@ -144,10 +147,9 @@ export default function CopyTradingSimulator({ trades, traderName, marketResolut
         <button
           className="btn-primary"
           onClick={handleRun}
-          disabled={resolutionsLoading}
           style={{ padding: "8px 24px", whiteSpace: "nowrap" }}
         >
-          {resolutionsLoading ? "Loading data…" : "Run Simulation"}
+          Run Simulation
         </button>
       </div>
 
@@ -294,8 +296,10 @@ export default function CopyTradingSimulator({ trades, traderName, marketResolut
             }}
           >
             {result._noClosedTrades
-              ? "No closed positions found in the available data. Try again once market resolutions finish loading, or this wallet may have no resolved markets in their last 1,000 trades."
-              : `Simulation based on ${result.numTrades} closed positions in chronological order (${result.resolutionTrades} market resolutions + ${result.pairTrades} manual exits). Past performance does not guarantee future results.`}
+              ? "No closed positions found. This wallet may have no resolved markets yet."
+              : result.source === "positions"
+                ? `Simulation based on ${result.numTrades} closed positions (Polymarket P&L data). Past performance does not guarantee future results.`
+                : `Simulation based on ${result.numTrades} closed positions (${result.resolutionTrades} market resolutions + ${result.pairTrades} manual exits). Past performance does not guarantee future results.`}
           </p>
         </div>
       )}

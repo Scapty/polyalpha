@@ -400,6 +400,7 @@ export default function WalletStalker() {
           {result.classification !== "Insufficient Data" && (
             <CopyTradingSimulator
               trades={trades}
+              positions={positions}
               traderName={traderName || "this trader"}
               marketResolutions={marketResolutions}
               resolutionsLoading={resolutionsLoading}

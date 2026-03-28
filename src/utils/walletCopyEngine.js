@@ -231,6 +231,102 @@ export function simulateWalletCopyTrading(
   };
 }
 
+// ── Positions-based simulation (preferred — uses Polymarket's own P&L data) ──
+/**
+ * Simulates copy trading using /positions endpoint data.
+ * cashPnl / initialValue = exact return % as computed by Polymarket.
+ * This correctly handles positions sold before resolution, which the
+ * gamma-API approach cannot (it always assumes hold-to-settlement).
+ *
+ * @param {Array}  positions    - From fetchWalletPositions(); all positions including redeemable
+ * @param {number} initialAmount
+ */
+export function simulateFromPositions(positions, initialAmount = 1000) {
+  if (!positions || positions.length === 0) return null;
+
+  // Only use positions where the market resolved (redeemable=true) AND we have cost data.
+  // Also include size≈0 positions (sold) if initialValue > 0 — indicates a closed trade.
+  const closed = positions
+    .filter((p) => {
+      const iv = parseFloat(p.initialValue) || 0;
+      if (iv < 0.01) return false;
+      const size = parseFloat(p.size) || 0;
+      // Resolved markets OR fully exited (size≈0 means position was sold/closed)
+      return p.redeemable === true || size < 0.01;
+    })
+    .map((p) => {
+      const iv = parseFloat(p.initialValue);
+      const pnl = parseFloat(p.cashPnl) || 0;
+      const endTs = p.endDate ? new Date(p.endDate).getTime() : null;
+      return {
+        market: (p.title || "") + (p.outcome ? ` (${p.outcome})` : ""),
+        returnPct: pnl / iv,
+        isWin: pnl > 0,
+        initialValue: iv,
+        sellTime: endTs,
+        date: endTs
+          ? new Date(endTs).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+          : "",
+      };
+    })
+    .sort((a, b) => (a.sellTime || 0) - (b.sellTime || 0));
+
+  if (closed.length === 0) return null;
+
+  // Relative position sizing: preserve the trader's bet-size ratios
+  const totalCapital = closed.reduce((s, p) => s + p.initialValue, 0);
+
+  let equity = initialAmount;
+  let peak = initialAmount;
+  let maxDrawdown = 0;
+  let winCount = 0;
+  let lossCount = 0;
+  const equityCurve = [{ trade: 0, equity: initialAmount, drawdown: 0 }];
+
+  closed.forEach((pos, i) => {
+    // Scale fraction: how much of total capital this position represented,
+    // capped at 30% to avoid single-trade blow-up in simulation
+    const fraction = Math.min(0.30, pos.initialValue / Math.max(totalCapital, 1));
+    const positionAmount = equity * fraction;
+    equity += positionAmount * pos.returnPct;
+    equity = Math.max(equity, 0.01);
+
+    if (pos.returnPct > 0) winCount++;
+    else lossCount++;
+
+    peak = Math.max(peak, equity);
+    const drawdown = ((peak - equity) / peak) * 100;
+    maxDrawdown = Math.max(maxDrawdown, drawdown);
+
+    equityCurve.push({
+      trade: i + 1,
+      market: pos.market,
+      date: pos.date,
+      isWin: pos.returnPct > 0,
+      equity: Math.round(equity * 100) / 100,
+      drawdown: Math.round(drawdown * 100) / 100,
+    });
+  });
+
+  const roi = ((equity - initialAmount) / initialAmount) * 100;
+
+  return {
+    equityCurve,
+    roi: Math.round(roi * 100) / 100,
+    maxDrawdown: Math.round(maxDrawdown * 100) / 100,
+    winCount,
+    lossCount,
+    finalEquity: Math.round(equity * 100) / 100,
+    initialAmount,
+    numTrades: closed.length,
+    totalClosedTrades: closed.length,
+    pairTrades: 0,
+    resolutionTrades: closed.length,
+    estimatedSlippageCost: 0,
+    source: "positions",
+  };
+}
+
 function emptyResult(initialAmount) {
   return {
     equityCurve: [{ trade: 0, equity: initialAmount, drawdown: 0 }],

@@ -283,7 +283,7 @@ export async function fetchWalletPositions(address) {
 
   try {
     const res = await fetchWithRetry(
-      `/api/data-positions?user=${address}&limit=500&sizeThreshold=.01`
+      `/api/data-positions?user=${address}&limit=500&sizeThreshold=0`
     );
     const data = await res.json();
     if (!Array.isArray(data)) throw new Error("No positions data");
