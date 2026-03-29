@@ -1,9 +1,10 @@
 import React, { useState } from "react";
+import GlowingInput from "../shared/GlowingInput";
+import SpotlightCard from "../shared/SpotlightCard";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 function getApiKey() { return localStorage.getItem("polyalpha_api_key") || ""; }
 
-// Normalize strings for fuzzy matching
 const norm = (s) => s.toLowerCase().replace(/[.\-']/g, "").replace(/\s+/g, " ").trim();
 
 export default function ArbitrageScanner() {
@@ -21,17 +22,14 @@ export default function ArbitrageScanner() {
   }
 
   function extractPolySlug(input) {
-    // Match: polymarket.com/event/SLUG or polymarket.com/event/SLUG/sub-path
     const m = input.match(/polymarket\.com\/event\/([^/?#]+)/i);
     if (m) return m[1];
-    // Match: polymarket.com/markets/SLUG (some URLs use /markets/ instead of /event/)
     const m2 = input.match(/polymarket\.com\/markets\/([^/?#]+)/i);
     if (m2) return m2[1];
     return null;
   }
 
   function extractKalshiTicker(input) {
-    // Match: kalshi.com/markets/TICKER or kalshi.com/markets/TICKER/sub/path
     const m = input.match(/kalshi\.com\/markets\/([^/?#]+)/i);
     return m ? m[1].toUpperCase() : null;
   }
@@ -50,7 +48,6 @@ export default function ArbitrageScanner() {
     try {
       const otherPlatform = platform === "polymarket" ? "Kalshi" : "Polymarket";
 
-      // ═══ STEP 1: Fetch ALL outcomes from source ═══
       setSearchStep("Fetching market data...");
       let sourceData = null;
 
@@ -65,7 +62,6 @@ export default function ArbitrageScanner() {
       }
       if (!sourceData) { setError("Could not fetch market data. Check the URL."); return; }
 
-      // ═══ STEP 2: Claude finds the match on the other platform (MATCHING ONLY) ═══
       setSearchStep(`AI finding match on ${otherPlatform}...`);
       const aiResult = await claudeCall(apiKey, `Find the equivalent prediction market on ${otherPlatform}.
 
@@ -100,13 +96,11 @@ Respond ONLY in valid JSON, nothing else:
   "explanation": "1-2 sentences"
 }`, 800, true);
 
-      // ═══ STEP 3: Fetch ALL outcomes from the other platform ═══
       let otherData = null;
       if (aiResult.found) {
         setSearchStep(`Fetching ${otherPlatform} prices...`);
         let ticker = aiResult.seriesTicker || aiResult.eventTicker || null;
         let slug = aiResult.slug || null;
-        // Fallback: extract from URL
         if (!ticker && !slug && aiResult.url) {
           if (otherPlatform === "Kalshi") {
             const m = aiResult.url.match(/kalshi\.com\/markets\/([^/?#]+)/i);
@@ -120,8 +114,6 @@ Respond ONLY in valid JSON, nothing else:
         else if (otherPlatform === "Polymarket" && slug) otherData = await fetchPolymarketAll(slug);
       }
 
-      // ═══ STEP 4: Verify match is real ═══
-      // If Claude said "found" but we couldn't fetch data, it's a false match
       if (aiResult.found && !otherData) {
         setResult({
           found: false,
@@ -137,7 +129,6 @@ Respond ONLY in valid JSON, nothing else:
       const kalshiData = platform === "kalshi" ? sourceData : otherData;
       const matched = matchOutcomes(polyData?.outcomes || [], kalshiData?.outcomes || []);
 
-      // ═══ STEP 5: Build analysis from REAL API data (not Claude guesses) ═══
       setSearchStep("Building analysis...");
       const analysis = await buildAnalysisFromData(apiKey, polyData, kalshiData, aiResult.matchQuality, matched);
 
@@ -159,16 +150,12 @@ Respond ONLY in valid JSON, nothing else:
     }
   };
 
-  // ─── Match outcomes between platforms ───
   function matchOutcomes(polyOutcomes, kalshiOutcomes) {
     const results = [];
     const usedKalshi = new Set();
 
-    // Filter out expired outcomes — only keep active ones
     const activePoly = polyOutcomes.filter((o) => !o.expired);
     const activeKalshi = kalshiOutcomes.filter((o) => !o.expired);
-
-    // If all poly outcomes are expired, fall back to all (for display purposes)
     const polyToUse = activePoly.length > 0 ? activePoly : polyOutcomes;
     const kalshiToUse = activeKalshi.length > 0 ? activeKalshi : kalshiOutcomes;
 
@@ -182,7 +169,6 @@ Respond ONLY in valid JSON, nothing else:
         const ko = kalshiToUse[i];
         const koNorm = norm(ko.title);
 
-        // Name matching score
         let nameScore = 0;
         if (koNorm === poNorm) nameScore = 100;
         else if (koNorm.includes(poNorm) || poNorm.includes(koNorm)) nameScore = 80;
@@ -192,16 +178,14 @@ Respond ONLY in valid JSON, nothing else:
           nameScore = poWords.length > 0 ? (wordHits / poWords.length) * 60 : 0;
         }
 
-        // Date proximity bonus: if both have dates, prefer closer dates
         let dateBonus = 0;
         if (po.endDate && ko.endDate) {
           const pDate = new Date(po.endDate);
           const kDate = new Date(ko.endDate);
           const daysDiff = Math.abs((pDate - kDate) / (1000 * 60 * 60 * 24));
-          if (daysDiff <= 3) dateBonus = 15;       // Same/very close date
-          else if (daysDiff <= 14) dateBonus = 10;  // Within 2 weeks
-          else if (daysDiff <= 60) dateBonus = 5;   // Within 2 months
-          // Penalty for very different dates (>6 months)
+          if (daysDiff <= 3) dateBonus = 15;
+          else if (daysDiff <= 14) dateBonus = 10;
+          else if (daysDiff <= 60) dateBonus = 5;
           if (daysDiff > 180) dateBonus = -20;
         }
 
@@ -217,14 +201,12 @@ Respond ONLY in valid JSON, nothing else:
       }
     }
 
-    // Add unmatched Kalshi outcomes
     for (let i = 0; i < kalshiOutcomes.length; i++) {
       if (!usedKalshi.has(i)) {
         results.push({ poly: null, kalshi: kalshiOutcomes[i], matchScore: 0 });
       }
     }
 
-    // Sort: matched first (by poly price desc), then unmatched
     return results.sort((a, b) => {
       const aMatched = a.poly && a.kalshi ? 1 : 0;
       const bMatched = b.poly && b.kalshi ? 1 : 0;
@@ -235,7 +217,6 @@ Respond ONLY in valid JSON, nothing else:
     });
   }
 
-  // ─── Fetch ALL Polymarket outcomes ───
   async function fetchPolymarketAll(slug) {
     const res = await fetch(`/api/events?slug=${slug}`);
     const data = await res.json();
@@ -243,10 +224,8 @@ Respond ONLY in valid JSON, nothing else:
     if (!events.length || !events[0]?.markets) return null;
     const ev = events[0];
     const markets = ev.markets || [];
-    // Use event-level volume if available (more accurate), fallback to sum of markets
     const volume24h = parseFloat(ev.volume24hr) || markets.reduce((s, m) => s + (parseFloat(m.volume24hr) || 0), 0);
     const volumeTotal = parseFloat(ev.volume) || markets.reduce((s, m) => s + (parseFloat(m.volume) || 0), 0);
-    // Get resolution info from the first market's description
     const firstMarket = markets[0] || {};
     const description = firstMarket.description || ev.description || "";
     const endDate = firstMarket.endDate || ev.endDate || "";
@@ -272,7 +251,6 @@ Respond ONLY in valid JSON, nothing else:
     };
   }
 
-  // ─── Fetch ALL Kalshi outcomes ───
   async function fetchKalshiAll(seriesOrEventTicker) {
     let res = await fetch(`/api/kalshi/markets?event_ticker=${seriesOrEventTicker}&status=open&limit=100`);
     let data = await res.json();
@@ -295,8 +273,6 @@ Respond ONLY in valid JSON, nothing else:
     } catch {}
     const volume24h = markets.reduce((s, m) => s + (parseFloat(m.volume_24h_fp) || 0), 0);
     const volumeTotal = markets.reduce((s, m) => s + (parseFloat(m.volume_fp) || 0), 0);
-    console.log(`[OddsAnalyzer] Kalshi ${seriesOrEventTicker}: ${markets.length} markets, vol24h=$${volume24h.toFixed(0)}, volTotal=$${volumeTotal.toFixed(0)}`);
-    // Get resolution info from the first market
     const firstMarket = markets[0] || {};
     const rules = firstMarket.rules_primary || "";
     const expiration = firstMarket.expiration_time || firstMarket.close_time || "";
@@ -319,7 +295,6 @@ Respond ONLY in valid JSON, nothing else:
     };
   }
 
-  // ─── Build analysis from REAL API data ───
   async function buildAnalysisFromData(apiKey, polyData, kalshiData, matchQuality, matchedOutcomes) {
     const polyRes = polyData?.resolutionDetails || "Not available";
     const polyEnd = polyData?.endDate || "Not available";
@@ -332,42 +307,6 @@ Respond ONLY in valid JSON, nothing else:
         deadlines: { polymarket: polyEnd, kalshi: kalshiEnd, comparison: "Resolution details not available from APIs." },
         resolution: { polymarket: "Not available", kalshi: "Not available", comparison: "Could not retrieve resolution criteria." },
       };
-    }
-
-    // Build arbitrage data from matched outcomes — EXCLUDE expired
-    const arbitrageExamples = (matchedOutcomes || [])
-      .filter((r) => r.poly && r.kalshi && !r.poly.expired && !r.kalshi.expired)
-      .slice(0, 5)
-      .map((r) => {
-        const polyYes = parseFloat(r.poly.yes) || 0;
-        const kalshiYesAsk = parseFloat(r.kalshi.yesAsk) || 0;
-        const kalshiNoBid = parseFloat(r.kalshi.noBid) || 0;
-        const polyNo = parseFloat(r.poly.no) || 0;
-        // Check: buy YES on cheaper + buy NO on cheaper < 100?
-        const combo1 = Math.min(polyYes, kalshiYesAsk) + Math.min(polyNo, kalshiNoBid || (100 - kalshiYesAsk));
-        // Date difference between platforms for this outcome
-        let dateDiffDays = 0;
-        if (r.poly.endDate && r.kalshi.endDate) {
-          dateDiffDays = Math.round(Math.abs(new Date(r.poly.endDate) - new Date(r.kalshi.endDate)) / (1000 * 60 * 60 * 24));
-        }
-        return {
-          outcome: r.poly.title, polyYes, polyNo, kalshiYes: kalshiYesAsk,
-          kalshiNo: kalshiNoBid || (100 - kalshiYesAsk), totalCost: combo1,
-          polyEndDate: r.poly.endDate || "unknown", kalshiEndDate: r.kalshi.endDate || "unknown",
-          dateDiffDays,
-        };
-      });
-
-    // Calculate time until resolution
-    let timeToResolve = "";
-    const endDates = [polyEnd, kalshiEnd].filter((d) => d && d !== "Not available");
-    if (endDates.length > 0) {
-      try {
-        const d = new Date(endDates[0]);
-        const now = new Date();
-        const months = Math.round((d - now) / (1000 * 60 * 60 * 24 * 30));
-        timeToResolve = months > 0 ? `${months} months` : "< 1 month";
-      } catch {}
     }
 
     try {
@@ -418,7 +357,6 @@ Respond ONLY in valid JSON:
     }
   }
 
-  // ─── Claude call ───
   async function claudeCall(apiKey, prompt, maxTokens, useWebSearch) {
     const body = { model: "claude-sonnet-4-20250514", max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] };
     if (useWebSearch) body.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }];
@@ -435,80 +373,90 @@ Respond ONLY in valid JSON:
     return JSON.parse(m[0]);
   }
 
-  // ═══ RENDER ═══
   return (
-    <div style={{ animation: "fadeInUp 0.5s var(--ease-out)", maxWidth: 820, margin: "0 auto" }}>
-      <div style={{ textAlign: "center", marginBottom: 28, paddingTop: 20 }}>
-        <h1 style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 700, margin: "0 0 8px" }}>Odds Analyzer</h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 15 }}>Paste a market link — compare every outcome across platforms</p>
+    <div style={{ animation: "fadeInUp 0.4s var(--ease-smooth) both", maxWidth: 820, margin: "0 auto" }}>
+      <div className="page-header">
+        <div className="section-number">03</div>
+        <h1>Odds Analyzer</h1>
+        <p>Compare prediction market prices across platforms. Find arbitrage opportunities.</p>
       </div>
 
-      {/* Warning banner */}
+      {/* Warning */}
       <div style={{
-        marginBottom: 28, padding: "12px 16px", borderRadius: 12,
-        background: "rgba(255,170,0,0.08)", border: "1px solid rgba(255,170,0,0.25)",
-        display: "flex", alignItems: "flex-start", gap: 10,
+        marginBottom: 24, padding: "16px 20px", borderRadius: 0,
+        background: "var(--bg-deep)", border: "1px solid var(--border)", borderLeft: "2px solid var(--warning)",
+        fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5, fontFamily: "var(--font-body)",
       }}>
-        <span style={{ fontSize: 16, flexShrink: 0 }}>⚠️</span>
-        <div style={{ fontSize: 13, color: "#ffcc00", lineHeight: 1.5 }}>
-          <strong>Price differences usually reflect different resolution conditions</strong> — different deadlines, sources, or criteria.
-          This is <em>not</em> arbitrage. Always verify the resolution rules on both platforms before trading.
-        </div>
+        <strong style={{ color: "var(--text-primary)" }}>Price differences usually reflect different resolution conditions</strong>: different deadlines, sources, or criteria.
+        Always verify the resolution rules on both platforms before trading.
       </div>
 
-      {/* INPUT */}
-      <div style={formStyle}>
+      {/* Input */}
+      <SpotlightCard style={{
+        background: "var(--bg-deep)",
+        borderRadius: 0,
+        padding: 24,
+        marginBottom: 24,
+      }}>
         <label style={labelStyle}>Market URL</label>
-        <input type="text" value={url} onChange={(e) => setUrl(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-          placeholder="Paste a Polymarket or Kalshi link..." style={{ ...inputStyle, fontSize: 13 }} />
+        <GlowingInput
+          value={url}
+          onChange={(v) => setUrl(v)}
+          onSubmit={() => handleSearch()}
+          loading={searching}
+          placeholder="Paste a Polymarket or Kalshi link..."
+          buttonText="Compare Prices"
+          loadingText={searchStep || "Searching..."}
+          style={{ marginBottom: 12 }}
+        />
         {url.trim() && detectPlatform(url) && (
           <div style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--accent)", textTransform: "uppercase" }}>
+            <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
               {detectPlatform(url) === "polymarket" ? "Polymarket" : "Kalshi"} detected
             </span>
-            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>→ searching {detectPlatform(url) === "polymarket" ? "Kalshi" : "Polymarket"}</span>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-body)" }}>
+              {"\u2192"} searching {detectPlatform(url) === "polymarket" ? "Kalshi" : "Polymarket"}
+            </span>
           </div>
         )}
-        <button onClick={handleSearch} disabled={searching || !url.trim()} style={{
-          width: "100%", marginTop: 4, padding: "14px 0", borderRadius: 14, border: "none",
-          background: searching ? "rgba(0,212,170,0.15)" : "var(--accent)",
-          color: searching ? "var(--accent)" : "#000",
-          fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 700,
-          cursor: searching ? "not-allowed" : "pointer",
-        }}>
-          {searching ? searchStep : "Compare Prices"}
-        </button>
-      </div>
+      </SpotlightCard>
+
+      {/* Empty state — minimal */}
+      {!result && !searching && !error && (
+        <div style={{ textAlign: "center", padding: "20px 0", animation: "fadeInUp 0.4s ease both 0.15s" }}>
+          <p style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--text-ghost)", letterSpacing: "0.02em" }}>
+            Paste a market URL above to compare prices across platforms
+          </p>
+        </div>
+      )}
 
       {error && <div style={errorStyle}>{error}</div>}
 
       {result && !result.found && (
         <div style={cardStyle}>
-          <div style={{ textAlign: "center", padding: "24px 24px 16px" }}>
-            <div style={{ fontSize: 24, marginBottom: 12 }}>❌</div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>No Match Found</div>
-            <div style={{ color: "var(--text-muted)", fontSize: 14 }}>{result.explanation}</div>
+          <div style={{ textAlign: "center", padding: 24 }}>
+            <p style={{ fontSize: 15, fontWeight: 500, color: "var(--text-primary)", marginBottom: 4, fontFamily: "var(--font-display)" }}>No Match Found</p>
+            <p style={{ color: "var(--text-muted)", fontSize: 13, fontFamily: "var(--font-body)" }}>{result.explanation}</p>
           </div>
           {result.sourceData?.outcomes?.length > 0 && (
             <div style={{ padding: "0 24px 20px" }}>
               <div style={{ ...sLabel, marginBottom: 8, color: "var(--accent)" }}>
-                {result.sourcePlatform === "polymarket" ? "Polymarket" : "Kalshi"} — {result.sourceData.eventTitle}
+                {result.sourcePlatform === "polymarket" ? "Polymarket" : "Kalshi"}: {result.sourceData.eventTitle}
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead><tr><th style={{ ...thStyle, textAlign: "left" }}>Outcome</th><th style={thStyle}>YES</th></tr></thead>
                 <tbody>
                   {result.sourceData.outcomes.slice(0, 10).map((o, i) => (
-                    <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                      <td style={{ ...tdStyle, fontWeight: 600 }}>{o.title}</td>
-                      <td style={tdP}>{o.yes || o.yesAsk || "—"}¢</td>
+                    <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ ...tdStyle, fontWeight: 500, color: "var(--text-primary)" }}>{o.title}</td>
+                      <td style={tdP}>{o.yes || o.yesAsk || "\u2014"}{"\u00A2"}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               {result.sourceUrl && (
                 <a href={result.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ ...linkStyle, marginTop: 12, display: "inline-flex" }}>
-                  View on {result.sourcePlatform === "polymarket" ? "Polymarket" : "Kalshi"} →
+                  View on {result.sourcePlatform === "polymarket" ? "Polymarket" : "Kalshi"} {"\u2192"}
                 </a>
               )}
             </div>
@@ -519,59 +467,66 @@ Respond ONLY in valid JSON:
       {result?.found && (
         <div style={cardStyle}>
           {/* Header */}
-          <div style={{ padding: "20px 24px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+          <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ fontSize: 22 }}>{result.matchQuality === "exact" ? "✅" : "⚠️"}</span>
+              <span style={{
+                fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 600,
+                padding: "3px 10px", borderRadius: 0, letterSpacing: "0.08em",
+                background: result.matchQuality === "exact" ? "rgba(16,185,129,0.12)" : result.matchQuality === "similar" ? "rgba(245,158,11,0.12)" : "transparent",
+                color: result.matchQuality === "exact" ? "var(--green)" : result.matchQuality === "similar" ? "var(--warning)" : "var(--text-muted)",
+                textTransform: "uppercase",
+                border: result.matchQuality === "exact" ? "none" : result.matchQuality === "similar" ? "none" : "1px solid var(--border)",
+              }}>
+                {result.matchQuality === "exact" ? "Exact" : result.matchQuality === "similar" ? "Similar" : "Related"}
+              </span>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 16 }}>{result.matchQuality === "exact" ? "Exact Match" : "Similar Match — Not Identical"}</div>
-                <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 2 }}>{result.explanation}</div>
+                <div style={{ fontWeight: 600, fontSize: 15, color: "var(--text-primary)", fontFamily: "var(--font-display)" }}>
+                  {result.matchQuality === "exact" ? "Exact Match" : "Similar Match (Not Identical)"}
+                </div>
+                <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 2, fontFamily: "var(--font-body)" }}>{result.explanation}</div>
               </div>
             </div>
             {result.matchQuality !== "exact" && (
               <div style={{
-                marginTop: 12, padding: "10px 14px", borderRadius: 10,
-                background: "rgba(255,170,0,0.1)", border: "1px solid rgba(255,170,0,0.25)",
-                display: "flex", alignItems: "center", gap: 8,
+                marginTop: 12, padding: "10px 14px", borderRadius: 0,
+                background: "var(--bg-elevated)", borderLeft: "3px solid var(--warning)",
+                fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, fontFamily: "var(--font-body)",
               }}>
-                <span style={{ fontSize: 16 }}>⚠️</span>
-                <div style={{ fontSize: 12, color: "#ffcc00", lineHeight: 1.4 }}>
-                  <strong>These bets are similar but NOT identical.</strong> Resolution conditions, deadlines or triggers may differ.
-                  Check the AI Analysis below before trading. Price comparison is shown but these are different bets.
-                </div>
+                <strong style={{ color: "var(--text-primary)" }}>These bets are similar but NOT identical.</strong> Resolution conditions, deadlines or triggers may differ.
               </div>
             )}
           </div>
 
           {/* Market titles */}
-          <div style={{ padding: "16px 24px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", gap: 24 }}>
+          <div style={{ padding: "16px 24px", borderBottom: "1px solid var(--border)", display: "flex", gap: 24 }}>
             <div style={{ flex: 1 }}>
               <div style={{ ...sLabel, color: "var(--accent)" }}>Polymarket</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>{result.polymarket.title || "—"}</div>
+              <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text-primary)", fontFamily: "var(--font-body)" }}>{result.polymarket.title || "\u2014"}</div>
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ ...sLabel, color: "#a78bfa" }}>Kalshi</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>{result.kalshi.title || "—"}</div>
+              <div style={{ ...sLabel, color: "var(--text-muted)" }}>Kalshi</div>
+              <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text-primary)", fontFamily: "var(--font-body)" }}>{result.kalshi.title || "\u2014"}</div>
             </div>
           </div>
 
-          {/* ═══ ALL OUTCOMES TABLE ═══ */}
+          {/* All outcomes table */}
           <div style={{ padding: "20px 24px", overflowX: "auto" }}>
-            <div style={{ ...sLabel, marginBottom: 12 }}>All Outcomes — Live Prices</div>
+            <div style={{ ...sLabel, marginBottom: 12 }}>All Outcomes: Live Prices</div>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
               <thead>
                 <tr>
                   <th style={{ ...thStyle, textAlign: "left" }}>Outcome</th>
-                  <th colSpan={2} style={{ ...thStyle, color: "var(--accent)", borderBottom: "2px solid rgba(0,212,170,0.2)" }}>Polymarket</th>
-                  <th colSpan={2} style={{ ...thStyle, color: "#a78bfa", borderBottom: "2px solid rgba(167,139,250,0.2)" }}>Kalshi</th>
+                  <th colSpan={2} style={{ ...thStyle, color: "var(--accent)" }}>Polymarket</th>
+                  <th colSpan={2} style={{ ...thStyle, color: "var(--text-muted)" }}>Kalshi</th>
                   <th style={thStyle}>Best YES</th>
                 </tr>
                 <tr>
-                  <th style={{ ...thStyle, borderBottom: "1px solid rgba(255,255,255,0.08)" }}></th>
-                  <th style={{ ...thStyle, fontSize: 9, color: "var(--accent)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>YES</th>
-                  <th style={{ ...thStyle, fontSize: 9, color: "rgba(0,212,170,0.5)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>NO</th>
-                  <th style={{ ...thStyle, fontSize: 9, color: "#a78bfa", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>YES</th>
-                  <th style={{ ...thStyle, fontSize: 9, color: "rgba(167,139,250,0.5)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>NO</th>
-                  <th style={{ ...thStyle, borderBottom: "1px solid rgba(255,255,255,0.08)" }}></th>
+                  <th style={{ ...thStyle, borderBottom: "1px solid var(--border)" }}></th>
+                  <th style={{ ...thStyle, fontSize: 9, color: "var(--accent)", borderBottom: "1px solid var(--border)" }}>YES</th>
+                  <th style={{ ...thStyle, fontSize: 9, color: "var(--text-ghost)", borderBottom: "1px solid var(--border)" }}>NO</th>
+                  <th style={{ ...thStyle, fontSize: 9, color: "var(--text-muted)", borderBottom: "1px solid var(--border)" }}>YES</th>
+                  <th style={{ ...thStyle, fontSize: 9, color: "var(--text-ghost)", borderBottom: "1px solid var(--border)" }}>NO</th>
+                  <th style={{ ...thStyle, borderBottom: "1px solid var(--border)" }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -581,53 +536,47 @@ Respond ONLY in valid JSON:
                   const kalshiYes = parseFloat(row.kalshi?.yesAsk) || 0;
                   const kalshiNo = parseFloat(row.kalshi?.noBid) || (kalshiYes ? 100 - kalshiYes : 0);
                   const best = !polyYes ? "kalshi" : !kalshiYes ? "poly" : polyYes < kalshiYes ? "poly" : kalshiYes < polyYes ? "kalshi" : "equal";
-                  // Arbitrage check
-                  const combo = polyYes && kalshiNo ? polyYes + kalshiNo : null;
-                  const combo2 = kalshiYes && polyNo ? kalshiYes + polyNo : null;
-                  // Only show arb tag for EXACT matches
-                  const hasArb = result.matchQuality === "exact" && ((combo && combo < 99.5) || (combo2 && combo2 < 99.5));
 
                   return (
-                    <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                    <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
                       <td style={{ ...tdStyle, maxWidth: 180 }}>
-                        <div style={{ fontWeight: 600, fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
-                          {row.poly?.title || row.kalshi?.title || "—"}
+                        <div style={{ fontWeight: 500, fontSize: 12, display: "flex", alignItems: "center", gap: 6, color: "var(--text-primary)", fontFamily: "var(--font-body)" }}>
+                          {row.poly?.title || row.kalshi?.title || "\u2014"}
                           {(row.poly?.expired || row.kalshi?.expired) && (
-                            <span style={{ fontSize: 8, padding: "1px 4px", borderRadius: 4, background: "rgba(255,68,68,0.2)", color: "#ff6b6b", fontWeight: 700 }}>EXPIRED</span>
+                            <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 0, background: "rgba(239,68,68,0.12)", color: "var(--red)", fontWeight: 600, fontFamily: "var(--font-mono)", letterSpacing: "0.08em" }}>EXPIRED</span>
                           )}
                         </div>
                         {row.poly && row.kalshi && row.poly.title !== row.kalshi.title && (
-                          <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>Kalshi: {row.kalshi.title}</div>
+                          <div style={{ fontSize: 10, color: "var(--text-ghost)", marginTop: 2, fontFamily: "var(--font-body)" }}>Kalshi: {row.kalshi.title}</div>
                         )}
                         {row.poly?.endDate && row.kalshi?.endDate && (
-                          <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 1 }}>
+                          <div style={{ fontSize: 9, color: "var(--text-ghost)", marginTop: 1, fontFamily: "var(--font-mono)" }}>
                             {(() => {
                               const pD = new Date(row.poly.endDate);
                               const kD = new Date(row.kalshi.endDate);
                               const daysDiff = Math.round(Math.abs(pD - kD) / (1000 * 60 * 60 * 24));
-                              return daysDiff > 3 ? `⚠ ${daysDiff}d date gap` : null;
+                              return daysDiff > 3 ? `${daysDiff}d date gap` : null;
                             })()}
                           </div>
                         )}
-{}
                       </td>
-                      <td style={tdP}>{row.poly ? <span>{row.poly.yes}¢</span> : "—"}</td>
-                      <td style={{ ...tdP, color: "rgba(255,255,255,0.4)" }}>{row.poly ? <span>{row.poly.no}¢</span> : "—"}</td>
+                      <td style={tdP}>{row.poly ? <span>{row.poly.yes}{"\u00A2"}</span> : "\u2014"}</td>
+                      <td style={{ ...tdP, color: "var(--text-ghost)" }}>{row.poly ? <span>{row.poly.no}{"\u00A2"}</span> : "\u2014"}</td>
                       <td style={tdP}>
                         {row.kalshi ? (
                           <div>
-                            <span>{row.kalshi.yesAsk}¢</span>
-                            <div style={{ fontSize: 9, color: "var(--text-muted)" }}>bid {row.kalshi.yesBid}¢</div>
+                            <span>{row.kalshi.yesAsk}{"\u00A2"}</span>
+                            <div style={{ fontSize: 9, color: "var(--text-ghost)" }}>bid {row.kalshi.yesBid}{"\u00A2"}</div>
                           </div>
-                        ) : "—"}
+                        ) : "\u2014"}
                       </td>
-                      <td style={{ ...tdP, color: "rgba(255,255,255,0.4)" }}>
-                        {row.kalshi ? <span>{row.kalshi.noBid || (100 - kalshiYes).toFixed(1)}¢</span> : "—"}
+                      <td style={{ ...tdP, color: "var(--text-ghost)" }}>
+                        {row.kalshi ? <span>{row.kalshi.noBid || (100 - kalshiYes).toFixed(1)}{"\u00A2"}</span> : "\u2014"}
                       </td>
                       <td style={tdP}>
-                        {best === "equal" || (!polyYes && !kalshiYes) ? <span style={{ color: "var(--text-muted)", fontSize: 11 }}>—</span> :
-                         best === "poly" ? <span style={{ color: "var(--accent)", fontWeight: 700, fontSize: 11 }}>Poly</span> :
-                         <span style={{ color: "#a78bfa", fontWeight: 700, fontSize: 11 }}>Kalshi</span>}
+                        {best === "equal" || (!polyYes && !kalshiYes) ? <span style={{ color: "var(--text-ghost)", fontSize: 11 }}>{"\u2014"}</span> :
+                         best === "poly" ? <span style={{ color: "var(--accent)", fontWeight: 600, fontSize: 11, fontFamily: "var(--font-mono)" }}>Poly</span> :
+                         <span style={{ color: "var(--text-secondary)", fontWeight: 600, fontSize: 11, fontFamily: "var(--font-mono)" }}>Kalshi</span>}
                       </td>
                     </tr>
                   );
@@ -638,11 +587,11 @@ Respond ONLY in valid JSON:
 
           {/* Links */}
           <div style={{ padding: "0 24px 20px", display: "flex", gap: 10 }}>
-            {result.polymarket.url && <a href={result.polymarket.url} target="_blank" rel="noopener noreferrer" style={linkStyle}>Polymarket →</a>}
-            {result.kalshi.url && <a href={result.kalshi.url} target="_blank" rel="noopener noreferrer" style={linkStyle}>Kalshi →</a>}
+            {result.polymarket.url && <a href={result.polymarket.url} target="_blank" rel="noopener noreferrer" style={linkStyle}>Polymarket {"\u2192"}</a>}
+            {result.kalshi.url && <a href={result.kalshi.url} target="_blank" rel="noopener noreferrer" style={linkStyle}>Kalshi {"\u2192"}</a>}
           </div>
 
-          {/* Arbitrage Education — only for exact matches with identical conditions */}
+          {/* Arbitrage Education */}
           {result.matchQuality === "exact" && result.analysis?.conditionsIdentical && result.matchedOutcomes?.length > 0 && (
             <ArbitrageEducation outcomes={result.matchedOutcomes} />
           )}
@@ -650,8 +599,8 @@ Respond ONLY in valid JSON:
           {/* AI Analysis */}
           {result.analysis && <AIAnalysis analysis={result.analysis} polyVol={result.polymarket} kalVol={result.kalshi} isExact={result.matchQuality === "exact"} />}
 
-          <div style={{ padding: "12px 24px", borderTop: "1px solid rgba(255,255,255,0.04)", fontSize: 11, color: "rgba(255,170,0,0.6)", textAlign: "center" }}>
-            Always verify resolution conditions before trading — platforms may have different deadlines or criteria.
+          <div style={{ padding: "12px 24px", borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--text-ghost)", textAlign: "center", fontFamily: "var(--font-body)" }}>
+            Always verify resolution conditions before trading. Platforms may have different deadlines or criteria.
           </div>
         </div>
       )}
@@ -662,7 +611,6 @@ Respond ONLY in valid JSON:
 function ArbitrageEducation({ outcomes }) {
   const [open, setOpen] = useState(false);
 
-  // Find the best arbitrage combo across all outcomes
   let best = null;
   for (const row of outcomes) {
     if (!row.poly || !row.kalshi || row.poly.expired || row.kalshi.expired) continue;
@@ -672,8 +620,8 @@ function ArbitrageEducation({ outcomes }) {
     const kalshiNo = row.kalshi.noBid ? parseFloat(row.kalshi.noBid) : (kalshiYes ? 100 - kalshiYes : 0);
     if (!polyYes || !kalshiYes) continue;
 
-    const combo1 = polyYes + kalshiNo; // Buy YES Poly + NO Kalshi
-    const combo2 = kalshiYes + polyNo; // Buy YES Kalshi + NO Poly
+    const combo1 = polyYes + kalshiNo;
+    const combo2 = kalshiYes + polyNo;
     const bestCombo = Math.min(combo1, combo2);
     const isCombo1 = combo1 <= combo2;
 
@@ -695,9 +643,8 @@ function ArbitrageEducation({ outcomes }) {
 
   if (!best) return null;
 
-  // Fee calculations
-  const polyFeeRate = 0.01; // ~1% taker
-  const kalshiFeePerContract = 2; // 2¢ per contract
+  const polyFeeRate = 0.01;
+  const kalshiFeePerContract = 2;
   const polyLegPrice = best.isCombo1 ? best.polyYes : best.polyNo;
   const kalshiLegPrice = best.isCombo1 ? best.kalshiNo : best.kalshiYes;
   const polyFee = (polyLegPrice * polyFeeRate).toFixed(1);
@@ -705,7 +652,6 @@ function ArbitrageEducation({ outcomes }) {
   const profitAfterFees = (100 - parseFloat(totalAfterFees)).toFixed(1);
   const stillProfitable = parseFloat(profitAfterFees) > 0;
 
-  // Savings calculation (buying cheaper)
   const priceDiff = Math.abs(best.polyYes - best.kalshiYes).toFixed(1);
   const cheaperPlatform = best.polyYes < best.kalshiYes ? "Polymarket" : "Kalshi";
   const cheaperPrice = Math.min(best.polyYes, best.kalshiYes);
@@ -714,70 +660,62 @@ function ArbitrageEducation({ outcomes }) {
   return (
     <div style={{ margin: "0 24px 20px" }}>
       <button onClick={() => setOpen(!open)} style={{
-        width: "100%", padding: "14px 18px", borderRadius: 12,
-        background: "rgba(255,170,0,0.06)", border: "1px solid rgba(255,170,0,0.2)",
+        width: "100%", padding: "14px 18px", borderRadius: open ? "12px 12px 0 0" : 12,
+        background: "var(--bg-elevated)", border: "1px solid var(--border)",
         cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center",
-        color: "#ffaa00",
+        color: "var(--text-primary)", fontSize: 13, fontWeight: 600, fontFamily: "var(--font-body)",
       }}>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>
-          💰 Price Comparison — {best.outcome}
-        </span>
-        <span style={{ fontSize: 12 }}>{open ? "▲" : "▼"}</span>
+        Price Comparison: {best.outcome}
+        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{open ? "\u25B2" : "\u25BC"}</span>
       </button>
 
       {open && (
-        <div style={{ padding: 18, background: "rgba(255,170,0,0.03)", borderRadius: "0 0 12px 12px", border: "1px solid rgba(255,170,0,0.1)", borderTop: "none" }}>
-          {/* Step 1: The opportunity */}
+        <div style={{ padding: 20, background: "var(--bg-elevated)", borderRadius: "0 0 12px 12px", border: "1px solid var(--border)", borderTop: "none" }}>
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "#ffaa00", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, fontWeight: 600 }}>
-              Step 1 — The Opportunity
+            <div style={stepLabelStyle}>
+              Step 1: The Opportunity
             </div>
-            <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.7 }}>
-              Buy <b>YES "{best.outcome}"</b> on <span style={{ color: best.buyYesPlatform === "Polymarket" ? "var(--accent)" : "#a78bfa", fontWeight: 700 }}>{best.buyYesPlatform}</span> at <b>{best.buyYesPrice}¢</b> +
-              Buy <b>NO</b> on <span style={{ color: best.buyNoPlatform === "Polymarket" ? "var(--accent)" : "#a78bfa", fontWeight: 700 }}>{best.buyNoPlatform}</span> at <b>{best.buyNoPrice}¢</b>
+            <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.7, fontFamily: "var(--font-body)" }}>
+              Buy <b>YES "{best.outcome}"</b> on <span style={{ color: "var(--accent)", fontWeight: 600 }}>{best.buyYesPlatform}</span> at <b>{best.buyYesPrice}{"\u00A2"}</b> +
+              Buy <b>NO</b> on <span style={{ color: "var(--accent)", fontWeight: 600 }}>{best.buyNoPlatform}</span> at <b>{best.buyNoPrice}{"\u00A2"}</b>
             </div>
-            <div style={{ marginTop: 8, display: "flex", gap: 20, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 13, fontFamily: "var(--font-mono)" }}>
-                Total: <b>{best.total.toFixed(1)}¢</b> → Guaranteed payout: <b>100¢</b> → Profit: <span style={{ color: "var(--accent)", fontWeight: 700 }}>{best.profitRaw}¢ ({best.profitPct}%)</span>
+            <div style={{ marginTop: 8, fontSize: 13, fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+              Total: <b>{best.total.toFixed(1)}{"\u00A2"}</b> {"\u2192"} Payout: <b>100{"\u00A2"}</b> {"\u2192"} Profit: <span style={{ color: "var(--green)", fontWeight: 600 }}>{best.profitRaw}{"\u00A2"} ({best.profitPct}%)</span>
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <div style={stepLabelStyle}>
+              Step 2: Fees
+            </div>
+            <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, fontFamily: "var(--font-body)" }}>
+              <div style={{ marginBottom: 4 }}>Polymarket taker fee (~1%): +{polyFee}{"\u00A2"}</div>
+              <div style={{ marginBottom: 4 }}>Kalshi trading fee: +{kalshiFeePerContract}{"\u00A2"} per contract</div>
+              <div style={{ marginTop: 8, fontWeight: 500, color: "var(--text-primary)" }}>
+                After fees: {totalAfterFees}{"\u00A2"} total {"\u2192"} Profit: <span style={{ color: stillProfitable ? "var(--green)" : "var(--red)", fontWeight: 600 }}>{profitAfterFees}{"\u00A2"} {!stillProfitable && "(negative)"}</span>
               </div>
             </div>
           </div>
 
-          {/* Step 2: The fees */}
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "#ffaa00", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, fontWeight: 600 }}>
-              Step 2 — But wait, fees...
+            <div style={stepLabelStyle}>
+              Step 3: Capital Lockup
             </div>
-            <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7 }}>
-              <div style={{ marginBottom: 4 }}>• Polymarket taker fee (~1%): <b>+{polyFee}¢</b></div>
-              <div style={{ marginBottom: 4 }}>• Kalshi trading fee: <b>+{kalshiFeePerContract}¢</b> per contract</div>
-              <div style={{ marginTop: 8, fontWeight: 600, color: "var(--text-primary)" }}>
-                After fees: {totalAfterFees}¢ total → Profit: <span style={{ color: stillProfitable ? "var(--accent)" : "#ff6b6b", fontWeight: 700 }}>{profitAfterFees}¢ {!stillProfitable && "(negative!)"}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Step 3: The real problem */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "#ffaa00", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, fontWeight: 600 }}>
-              Step 3 — The real problem
-            </div>
-            <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7 }}>
+            <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, margin: 0, fontFamily: "var(--font-body)" }}>
               {stillProfitable
-                ? `Even with ${profitAfterFees}¢ profit per share, your capital is locked until the event resolves. A savings account earns 4-5%/year risk-free. Professional bots also close these gaps in milliseconds — by the time you execute, the prices may have moved.`
-                : `The fees completely eliminate the profit. This is why retail arbitrage doesn't work in prediction markets — the margins are too thin and fees eat everything.`}
-            </div>
+                ? `Even with ${profitAfterFees}\u00A2 profit per share, your capital is locked until the event resolves. Professional bots close these gaps in milliseconds.`
+                : `The fees eliminate the profit. Retail arbitrage doesn't work in prediction markets: margins are too thin and fees eat everything.`}
+            </p>
           </div>
 
-          {/* Conclusion */}
-          <div style={{ padding: 14, borderRadius: 10, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.15)" }}>
-            <div style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--accent)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6, fontWeight: 600 }}>
-              💡 The smart move
+          <div style={{ padding: 14, borderRadius: 0, background: "var(--bg-deep)", border: "1px solid var(--border)" }}>
+            <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6, fontWeight: 600 }}>
+              Practical Takeaway
             </div>
-            <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.7 }}>
-              Forget arbitrage. If you want to bet on <b>{best.outcome}</b>, buy on <span style={{ color: cheaperPlatform === "Polymarket" ? "var(--accent)" : "#a78bfa", fontWeight: 700 }}>{cheaperPlatform}</span> at <b>{cheaperPrice}¢</b> instead of {cheaperPlatform === "Polymarket" ? "Kalshi" : "Polymarket"} at {Math.max(best.polyYes, best.kalshiYes)}¢.
-              You save <b>{priceDiff}¢/share</b> — on a $1,000 bet, that's <b>${savingsOn1000} extra profit</b> if you're right.
-            </div>
+            <p style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.7, margin: 0, fontFamily: "var(--font-body)" }}>
+              If you want to bet on <b>{best.outcome}</b>, buy on <span style={{ color: "var(--accent)", fontWeight: 600 }}>{cheaperPlatform}</span> at <b>{cheaperPrice}{"\u00A2"}</b>.
+              You save <b>{priceDiff}{"\u00A2"}/share</b> {"\u2014"} on a $1,000 bet, that's <b>${savingsOn1000} extra profit</b>.
+            </p>
           </div>
         </div>
       )}
@@ -786,13 +724,11 @@ function ArbitrageEducation({ outcomes }) {
 }
 
 function fmtVol(v) {
-  if (!v || v === 0) return "—";
+  if (!v || v === 0) return "\u2014";
   if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
   if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`;
   return `$${v.toFixed(0)}`;
 }
-
-// RiskBadge removed
 
 function AIAnalysis({ analysis, polyVol, kalVol, isExact }) {
   const [open, setOpen] = useState(false);
@@ -800,59 +736,57 @@ function AIAnalysis({ analysis, polyVol, kalVol, isExact }) {
   const r = analysis.resolution;
   const rec = analysis.recommendation;
   return (
-    <div style={{ margin: "0 24px 20px", borderRadius: 14, overflow: "hidden", border: "1px solid rgba(139,92,246,0.2)", background: "rgba(139,92,246,0.04)" }}>
-      <button onClick={() => setOpen(!open)} style={{ width: "100%", padding: "14px 18px", background: "none", border: "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", color: "#a78bfa" }}>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>🤖 AI Analysis</span>
-        <span style={{ fontSize: 12 }}>{open ? "▲" : "▼"}</span>
+    <div style={{ margin: "0 24px 20px", borderRadius: 0, overflow: "hidden", border: "1px solid var(--border)" }}>
+      <button onClick={() => setOpen(!open)} style={{ width: "100%", padding: "14px 18px", background: "var(--bg-elevated)", border: "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--text-primary)", fontSize: 13, fontWeight: 600, fontFamily: "var(--font-body)" }}>
+        Condition Analysis
+        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{open ? "\u25B2" : "\u25BC"}</span>
       </button>
       {open && (
-        <div style={{ padding: "0 18px 18px" }}>
-          {/* Conditions status */}
+        <div style={{ padding: "16px 16px 20px", background: "var(--bg-deep)" }}>
           {analysis.conditionsIdentical !== undefined && (
-            <div style={{ marginBottom: 14, padding: "8px 12px", borderRadius: 8, background: analysis.conditionsIdentical ? "rgba(0,212,170,0.06)" : "rgba(255,170,0,0.06)", border: `1px solid ${analysis.conditionsIdentical ? "rgba(0,212,170,0.15)" : "rgba(255,170,0,0.15)"}`, fontSize: 12 }}>
+            <div style={{ marginBottom: 14, padding: "8px 12px", borderRadius: 0, background: "var(--bg-elevated)", border: "1px solid var(--border)", fontSize: 12, fontFamily: "var(--font-body)" }}>
               {analysis.conditionsIdentical
-                ? <span style={{ color: "var(--accent)" }}>✅ Resolution conditions are identical across platforms</span>
-                : <span style={{ color: "#ffaa00" }}>⚠️ Resolution conditions differ — read details below</span>}
+                ? <span style={{ color: "var(--green)" }}>Resolution conditions are identical across platforms</span>
+                : <span style={{ color: "var(--warning)" }}>Resolution conditions differ. Read details below.</span>}
             </div>
           )}
 
           {d && (
-            <div style={{ marginBottom: 18 }}>
+            <div style={{ marginBottom: 16 }}>
               <div style={aL}>Deadlines</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
-                <div style={ac}><div style={{ fontSize: 10, color: "var(--accent)", fontFamily: "var(--font-mono)", marginBottom: 4 }}>POLYMARKET</div><div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{d.polymarket || "—"}</div></div>
-                <div style={ac}><div style={{ fontSize: 10, color: "#a78bfa", fontFamily: "var(--font-mono)", marginBottom: 4 }}>KALSHI</div><div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{d.kalshi || "—"}</div></div>
+                <div style={ac}><div style={{ fontSize: 10, color: "var(--accent)", fontFamily: "var(--font-mono)", marginBottom: 4, letterSpacing: "0.08em" }}>POLYMARKET</div><div style={{ fontSize: 13, color: "var(--text-secondary)", fontFamily: "var(--font-body)" }}>{d.polymarket || "\u2014"}</div></div>
+                <div style={ac}><div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginBottom: 4, letterSpacing: "0.08em" }}>KALSHI</div><div style={{ fontSize: 13, color: "var(--text-secondary)", fontFamily: "var(--font-body)" }}>{d.kalshi || "\u2014"}</div></div>
               </div>
-              {d.comparison && <div style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>{d.comparison}</div>}
+              {d.comparison && <div style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-body)" }}>{d.comparison}</div>}
             </div>
           )}
           {r && (
-            <div style={{ marginBottom: 18 }}>
+            <div style={{ marginBottom: 16 }}>
               <div style={aL}>Resolution Criteria</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
-                <div style={ac}><div style={{ fontSize: 10, color: "var(--accent)", fontFamily: "var(--font-mono)", marginBottom: 4 }}>POLYMARKET</div><div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{r.polymarket || "—"}</div></div>
-                <div style={ac}><div style={{ fontSize: 10, color: "#a78bfa", fontFamily: "var(--font-mono)", marginBottom: 4 }}>KALSHI</div><div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{r.kalshi || "—"}</div></div>
+                <div style={ac}><div style={{ fontSize: 10, color: "var(--accent)", fontFamily: "var(--font-mono)", marginBottom: 4, letterSpacing: "0.08em" }}>POLYMARKET</div><div style={{ fontSize: 13, color: "var(--text-secondary)", fontFamily: "var(--font-body)" }}>{r.polymarket || "\u2014"}</div></div>
+                <div style={ac}><div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginBottom: 4, letterSpacing: "0.08em" }}>KALSHI</div><div style={{ fontSize: 13, color: "var(--text-secondary)", fontFamily: "var(--font-body)" }}>{r.kalshi || "\u2014"}</div></div>
               </div>
-              {r.comparison && <div style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>{r.comparison}</div>}
+              {r.comparison && <div style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-body)" }}>{r.comparison}</div>}
             </div>
           )}
 
-          {/* Volume - real data only */}
           {(polyVol?.volume24h > 0 || kalVol?.volume24h > 0) && (
-            <div style={{ marginBottom: 18 }}>
-              <div style={aL}>Liquidity & Volume (Live)</div>
+            <div style={{ marginBottom: 16 }}>
+              <div style={aL}>Volume (Live)</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
                 <div style={ac}>
-                  <div style={{ fontSize: 10, color: "var(--accent)", fontFamily: "var(--font-mono)", marginBottom: 4 }}>POLYMARKET</div>
+                  <div style={{ fontSize: 10, color: "var(--accent)", fontFamily: "var(--font-mono)", marginBottom: 4, letterSpacing: "0.08em" }}>POLYMARKET</div>
                   {polyVol?.volume24h > 0
-                    ? <><div style={{ fontSize: 15, fontWeight: 700, fontFamily: "var(--font-mono)" }}>{fmtVol(polyVol.volume24h)} <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 400 }}>24h</span></div>
+                    ? <><div style={{ fontSize: 15, fontWeight: 500, fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{fmtVol(polyVol.volume24h)} <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 400 }}>24h</span></div>
                       {polyVol?.volumeTotal > 0 && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{fmtVol(polyVol.volumeTotal)} total</div>}</>
                     : <div style={{ fontSize: 13, color: "var(--text-muted)" }}>No data</div>}
                 </div>
                 <div style={ac}>
-                  <div style={{ fontSize: 10, color: "#a78bfa", fontFamily: "var(--font-mono)", marginBottom: 4 }}>KALSHI</div>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginBottom: 4, letterSpacing: "0.08em" }}>KALSHI</div>
                   {kalVol?.volume24h > 0
-                    ? <><div style={{ fontSize: 15, fontWeight: 700, fontFamily: "var(--font-mono)" }}>{fmtVol(kalVol.volume24h)} <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 400 }}>24h</span></div>
+                    ? <><div style={{ fontSize: 15, fontWeight: 500, fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{fmtVol(kalVol.volume24h)} <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 400 }}>24h</span></div>
                       {kalVol?.volumeTotal > 0 && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{fmtVol(kalVol.volumeTotal)} total</div>}</>
                     : <div style={{ fontSize: 13, color: "var(--text-muted)" }}>No data</div>}
                 </div>
@@ -860,16 +794,15 @@ function AIAnalysis({ analysis, polyVol, kalVol, isExact }) {
               {polyVol?.volume24h > 0 && kalVol?.volume24h > 0 && (() => {
                 const more = polyVol.volume24h > kalVol.volume24h ? "Polymarket" : "Kalshi";
                 const ratio = Math.max(polyVol.volume24h, kalVol.volume24h) / Math.min(polyVol.volume24h, kalVol.volume24h);
-                return <div style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>{more} is {ratio.toFixed(1)}x more liquid</div>;
+                return <div style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-body)" }}>{more} is {ratio.toFixed(1)}x more liquid</div>;
               })()}
             </div>
           )}
 
-          {/* Recommendation */}
           {rec && (
-            <div style={{ padding: 14, borderRadius: 12, background: "rgba(139,92,246,0.06)", border: "1px solid rgba(139,92,246,0.15)" }}>
-              <div style={aL}>💡 Recommendation</div>
-              <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.6 }}>{rec}</div>
+            <div style={{ padding: 14, borderRadius: 0, background: "var(--bg-elevated)", border: "1px solid var(--border)" }}>
+              <div style={aL}>Recommendation</div>
+              <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.6, fontFamily: "var(--font-body)" }}>{rec}</div>
             </div>
           )}
         </div>
@@ -878,15 +811,15 @@ function AIAnalysis({ analysis, polyVol, kalVol, isExact }) {
   );
 }
 
-const formStyle = { borderRadius: 20, background: "rgba(31,32,35,0.95)", backdropFilter: "blur(20px)", border: "1.5px solid rgba(255,255,255,0.08)", boxShadow: "0 8px 30px rgba(0,0,0,0.24)", padding: 28, marginBottom: 32 };
-const labelStyle = { display: "block", fontSize: 11, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: 1, marginBottom: 6 };
-const inputStyle = { width: "100%", padding: "12px 16px", borderRadius: 12, border: "1.5px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "var(--text-primary)", fontSize: 14, fontFamily: "var(--font-mono)", outline: "none", marginBottom: 16, boxSizing: "border-box" };
-const cardStyle = { borderRadius: 20, background: "rgba(31,32,35,0.95)", overflow: "hidden", border: "1.5px solid rgba(255,255,255,0.08)" };
-const errorStyle = { padding: 16, borderRadius: 12, background: "rgba(255,68,68,0.08)", border: "1px solid rgba(255,68,68,0.2)", color: "#ff6b6b", fontSize: 14, marginBottom: 24, fontFamily: "var(--font-mono)" };
-const thStyle = { padding: "8px 10px", fontSize: 10, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: 1, textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.08)", fontWeight: 600 };
-const tdStyle = { padding: "10px 10px", fontSize: 13 };
+const labelStyle = { display: "block", fontSize: 11, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: "0.08em", marginBottom: 6 };
+const inputStyle = { width: "100%", height: 56, padding: "0 16px", borderRadius: 0, border: "1px solid var(--border)", background: "var(--bg-deep)", color: "var(--text-primary)", fontSize: 13, fontFamily: "var(--font-mono)", outline: "none", marginBottom: 12, boxSizing: "border-box", transition: "border-color 150ms ease, box-shadow 150ms ease" };
+const cardStyle = { borderRadius: 0, background: "var(--bg-deep)", overflow: "hidden", border: "1px solid var(--border)" };
+const errorStyle = { padding: 14, borderRadius: 0, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "var(--red)", fontSize: 13, marginBottom: 20, fontFamily: "var(--font-mono)" };
+const thStyle = { padding: "8px 10px", fontSize: 11, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: "0.08em", textAlign: "center", borderBottom: "1px solid var(--border)", fontWeight: 500 };
+const tdStyle = { padding: "10px 10px", fontSize: 13, fontFamily: "var(--font-body)" };
 const tdP = { padding: "10px 10px", fontSize: 13, fontFamily: "var(--font-mono)", textAlign: "center", color: "var(--text-primary)" };
-const linkStyle = { display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 20px", borderRadius: 10, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--text-primary)", textDecoration: "none", fontSize: 13, fontFamily: "var(--font-mono)" };
-const sLabel = { fontSize: 11, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: 1 };
-const aL = { fontSize: 12, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "#a78bfa", letterSpacing: 0.5, marginBottom: 6, fontWeight: 600 };
-const ac = { padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" };
+const linkStyle = { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 0, background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text-primary)", textDecoration: "none", fontSize: 12, fontFamily: "var(--font-mono)", transition: "all 150ms ease" };
+const sLabel = { fontSize: 11, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: "0.08em" };
+const aL = { fontSize: 11, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--accent)", letterSpacing: "0.08em", marginBottom: 6, fontWeight: 600 };
+const ac = { padding: "10px 12px", borderRadius: 0, background: "var(--bg-elevated)", border: "1px solid var(--border)" };
+const stepLabelStyle = { fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8, fontWeight: 600 };

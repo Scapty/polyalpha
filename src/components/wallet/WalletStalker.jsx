@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { fetchWalletTrades, fetchTraderProfile, fetchWalletPositions, fetchMarketResolutions } from "../../utils/api";
-import { calculateBotScore } from "../../utils/botScoring";
-import WalletInput from "./WalletInput";
+import { computeWalletMetrics } from "../../utils/walletMetrics";
+import { classifyTrader, clearClassificationCache, fallbackClassification } from "../../utils/traderClassifier";
+import { hasApiKey } from "../../utils/aiAgent";
+import GlowingInput from "../shared/GlowingInput";
 import BotScoreGauge from "./BotScoreGauge";
 import FactorBreakdown from "./FactorBreakdown";
 import MarketCategoryBreakdown from "./MarketCategoryBreakdown";
@@ -11,11 +13,14 @@ import WalletTracker from "./WalletTracker";
 import ActivityHeatmap from "./ActivityHeatmap";
 import DataBadge from "../shared/DataBadge";
 
+
 export default function WalletStalker() {
   const [searchParams] = useSearchParams();
   const [address, setAddress] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+  const [metrics, setMetrics] = useState(null);
+  const [classification, setClassification] = useState(null);
+  const [classifying, setClassifying] = useState(false);
   const [isLive, setIsLive] = useState(false);
   const [trades, setTrades] = useState([]);
   const [error, setError] = useState(null);
@@ -28,7 +33,6 @@ export default function WalletStalker() {
 
   const lastAnalyzedRef = useRef("");
 
-  // Auto-analyze if address is passed via URL params (from Leaderboard click)
   useEffect(() => {
     const urlAddress = searchParams.get("address");
     if (urlAddress && urlAddress !== lastAnalyzedRef.current) {
@@ -41,8 +45,13 @@ export default function WalletStalker() {
   async function runAnalysis(walletAddr) {
     if (!walletAddr || !walletAddr.trim()) return;
 
+    // Always clear cache so AI fires fresh on every analysis
+    clearClassificationCache(walletAddr.trim());
+
     setLoading(true);
-    setResult(null);
+    setMetrics(null);
+    setClassification(null);
+    setClassifying(false);
     setTrades([]);
     setError(null);
     setProfile(null);
@@ -65,25 +74,24 @@ export default function WalletStalker() {
       setProfile(profileResult.profile);
       setPositions(positionsResult.positions);
 
-      // Name: prefer leaderboard username, fall back to first trade name
       const name =
         profileResult.profile?.userName ||
         (tradesResult.trades.length > 0 ? tradesResult.trades[0].name : null);
       if (name) setTraderName(name);
 
-      if (tradesResult.trades.length >= 5) {
-        const analysis = calculateBotScore(tradesResult.trades);
-        setResult(analysis);
-      } else if (tradesResult.trades.length > 0) {
-        setResult({
-          score: 0,
-          classification: "Insufficient Data",
-          factors: [],
-          stats: { totalTrades: tradesResult.trades.length },
+      // Step 1: Compute metrics instantly (sync)
+      if (tradesResult.trades.length > 0) {
+        const m = computeWalletMetrics(tradesResult.trades, positionsResult.positions);
+        setMetrics(m);
+
+        // Step 2: AI classification (async)
+        setClassifying(true);
+        classifyTrader(walletAddr.trim(), m).then((result) => {
+          setClassification(result);
+          setClassifying(false);
         });
       }
 
-      // Fetch market resolutions in the background after main analysis completes
       if (tradesResult.trades.length > 0) {
         setResolutionsLoading(true);
         fetchMarketResolutions(tradesResult.trades).then((resMap) => {
@@ -106,122 +114,106 @@ export default function WalletStalker() {
   }
 
   const displayedTrades = showAllTrades ? trades : trades.slice(0, 25);
-
-  // Compute overview stats from trades + profile
   const overviewStats = trades.length > 0 ? computeOverviewStats(trades, profile, positions) : null;
+  const hasData = metrics !== null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      {/* Header */}
-      <div>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 26,
-            fontWeight: 700,
-            marginBottom: 6,
-            letterSpacing: "-0.02em",
-          }}
-        >
-          Wallet Stalker
-        </h1>
-        <p style={{ fontSize: 14, color: "var(--text-muted)" }}>
-          Paste any Polymarket wallet address to get a full trader X-ray: bot detection, activity
-          patterns, and copy trading simulation
-        </p>
+    <div style={{ display: "flex", flexDirection: "column", gap: 48 }}>
+      {/* Page header */}
+      <div className="page-header" style={{ animation: "fadeInUp 0.4s var(--ease-smooth) both" }}>
+        <div className="section-number">01</div>
+        <h1>Wallet Stalker</h1>
+        <p>Analyze any Polymarket trader. Bot detection, activity patterns, copy trading simulation.</p>
       </div>
 
-      {/* Section 1: Input */}
-      <WalletInput
-        address={address}
-        onAddressChange={setAddress}
+      {/* Input */}
+      <GlowingInput
+        value={address}
+        onChange={setAddress}
         onSubmit={(addr) => handleAnalyze(addr)}
         loading={loading}
+        placeholder="Paste a Polymarket wallet address (0x...)"
+        buttonText="Analyze"
+        loadingText="Scanning..."
       />
 
-      {/* Landing — value proposition (shown when no analysis is running) */}
-      {!result && !loading && !error && (
-        <div style={{ marginTop: 16 }}>
-          {/* Features grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
-            {[
-              { icon: "🤖", title: "Bot Detection", desc: "6-factor behavioral algorithm classifies any wallet as Bot, Human, or Uncertain based on trade patterns." },
-              { icon: "📊", title: "Odds Analyzer", desc: "Compare odds across Polymarket and Kalshi. AI-powered resolution condition comparison." },
-              { icon: "📈", title: "Copy Trading Sim", desc: "Simulate what would happen if you copied a trader's strategy with your own capital." },
-            ].map((f) => (
-              <div key={f.title} className="glass-card" style={{ padding: 20, textAlign: "center" }}>
-                <div style={{ fontSize: 28, marginBottom: 8 }}>{f.icon}</div>
-                <div style={{ fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 600, marginBottom: 6, color: "var(--text-primary)" }}>{f.title}</div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>{f.desc}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Stats */}
-          <div className="glass-card" style={{ padding: 20, display: "flex", justifyContent: "space-around", textAlign: "center" }}>
-            {[
-              { value: "500+", label: "Markets Tracked" },
-              { value: "2", label: "Platforms Compared" },
-              { value: "Real-time", label: "Orderbook Data" },
-              { value: "AI-Powered", label: "Analysis Engine" },
-            ].map((s) => (
-              <div key={s.label}>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 20, fontWeight: 700, color: "var(--accent)" }}>{s.value}</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{s.label}</div>
-              </div>
-            ))}
-          </div>
+      {/* Empty state — minimal */}
+      {!hasData && !loading && !error && (
+        <div style={{ textAlign: "center", padding: "40px 0 20px", animation: "fadeInUp 0.4s ease both 0.1s" }}>
+          <p style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--text-ghost)", letterSpacing: "0.02em" }}>
+            Paste a wallet address above to start analysis
+          </p>
         </div>
       )}
 
-      {/* Loading state */}
+      {/* Loading */}
       {loading && (
-        <div className="animate-fade-in glass-card" style={{ padding: 32, textAlign: "center" }}>
+        <div
+          className="animate-fade-in"
+          style={{
+            background: "var(--bg-deep)",
+            border: "1px solid var(--border)",
+            borderRadius: 0,
+            padding: 48,
+            textAlign: "center",
+          }}
+        >
           <div
             style={{
-              width: 40,
-              height: 40,
+              width: 36,
+              height: 36,
               borderRadius: "50%",
-              border: "3px solid var(--border-subtle)",
+              border: "2px solid var(--border)",
               borderTopColor: "var(--accent)",
               animation: "spin 0.8s linear infinite",
               margin: "0 auto 20px",
             }}
           />
-          <h3
+          <p
             style={{
-              fontFamily: "var(--font-display)",
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: 600,
-              marginBottom: 8,
+              fontFamily: "var(--font-display)",
+              color: "var(--text-primary)",
+              marginBottom: 6,
             }}
           >
             Scanning wallet...
-          </h3>
-          <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
+          </p>
+          <p style={{ fontSize: 13, fontFamily: "var(--font-body)", color: "var(--text-secondary)" }}>
             Fetching real trade data from Polymarket Data API
           </p>
         </div>
       )}
 
-      {/* No trades found message */}
+      {/* Error -- no trades */}
       {!loading && error && trades.length === 0 && (
-        <div className="animate-fade-in glass-card" style={{ padding: 24, textAlign: "center" }}>
-          <div style={{ fontSize: 36, marginBottom: 12 }}>{"\uD83D\uDD0D"}</div>
-          <h3
+        <div
+          className="animate-fade-in"
+          style={{
+            background: "var(--bg-deep)",
+            border: "1px solid var(--border)",
+            borderRadius: 0,
+            padding: 32,
+            textAlign: "center",
+          }}
+        >
+          <p
             style={{
-              fontFamily: "var(--font-display)",
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: 600,
-              marginBottom: 8,
+              fontFamily: "var(--font-display)",
+              color: "var(--text-primary)",
+              marginBottom: 6,
             }}
           >
             No Trade Data Available
-          </h3>
+          </p>
           <p
             style={{
-              fontSize: 13,
-              color: "var(--text-muted)",
+              fontSize: 14,
+              fontFamily: "var(--font-body)",
+              color: "var(--text-secondary)",
               lineHeight: 1.6,
               maxWidth: 500,
               margin: "0 auto",
@@ -230,36 +222,40 @@ export default function WalletStalker() {
             {error}
           </p>
           {profile && (
-            <p
-              style={{
-                fontSize: 12,
-                color: "var(--text-muted)",
-                marginTop: 12,
-                fontStyle: "italic",
-              }}
-            >
-              Note: This wallet does appear on the Polymarket leaderboard (see profile above), but
-              individual trade data isn't available via the public Data API.
+            <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 12, fontFamily: "var(--font-body)" }}>
+              This wallet appears on the Polymarket leaderboard, but individual trade data
+              isn't available via the public Data API.
             </p>
           )}
         </div>
       )}
 
-      {/* Results — all sections flow top to bottom */}
-      {result && !loading && (
+      {/* Results */}
+      {hasData && !loading && (
         <div
           className="animate-fade-in-up"
-          style={{ display: "flex", flexDirection: "column", gap: 20 }}
+          style={{ display: "flex", flexDirection: "column", gap: 48 }}
         >
-          {/* Data source badge + address */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          {/* Data badge + address bar */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+              padding: "16px 20px",
+              background: "var(--bg-deep)",
+              border: "1px solid var(--border)",
+              borderRadius: 0,
+            }}
+          >
             <DataBadge status={isLive ? "live" : "demo"} label={isLive ? "LIVE DATA" : "DEMO"} />
             {traderName && (
               <span
                 style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: 14,
+                  fontSize: 15,
                   fontWeight: 600,
+                  fontFamily: "var(--font-display)",
                   color: "var(--text-primary)",
                 }}
               >
@@ -271,11 +267,11 @@ export default function WalletStalker() {
                 style={{
                   fontFamily: "var(--font-mono)",
                   fontSize: 11,
-                  color: "var(--accent)",
-                  background: "rgba(0,212,170,0.08)",
-                  border: "1px solid rgba(0,212,170,0.2)",
-                  borderRadius: 4,
-                  padding: "2px 8px",
+                  color: "var(--accent-bright)",
+                  background: "var(--accent-glow)",
+                  borderRadius: 0,
+                  padding: "3px 10px",
+                  letterSpacing: "0.02em",
                 }}
               >
                 {profile.rank} all-time
@@ -295,24 +291,41 @@ export default function WalletStalker() {
             <button
               onClick={() => window.print()}
               style={{
-                marginLeft: "auto", padding: "5px 14px", fontSize: 11,
-                fontFamily: "var(--font-mono)", fontWeight: 600,
-                background: "rgba(0,212,170,0.1)", color: "var(--accent)",
-                border: "1px solid rgba(0,212,170,0.2)", borderRadius: 6,
-                cursor: "pointer", whiteSpace: "nowrap",
+                marginLeft: "auto",
+                padding: "6px 16px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                fontWeight: 500,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                background: "transparent",
+                color: "var(--text-muted)",
+                border: "1px solid var(--border)",
+                borderRadius: 0,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                transition: "all 150ms ease",
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.borderColor = "var(--accent)";
+                e.target.style.color = "var(--text-primary)";
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.borderColor = "var(--border)";
+                e.target.style.color = "var(--text-muted)";
               }}
             >
               Export PDF
             </button>
           </div>
 
-          {/* Section 2: Overview Cards */}
+          {/* Overview stat cards */}
           {overviewStats && (
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                gap: 12,
+                gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                gap: 16,
               }}
             >
               {overviewStats
@@ -322,7 +335,12 @@ export default function WalletStalker() {
                     key={stat.label}
                     className="stat-card"
                     style={{
-                      animation: `fadeInUp 0.4s var(--ease-out) ${i * 60}ms both`,
+                      background: "var(--bg-deep)",
+                      border: "1px solid var(--border)",
+                      borderTop: "2px solid var(--accent)",
+                      borderRadius: 0,
+                      padding: 24,
+                      animation: `fadeInUp 0.3s ease ${i * 50}ms both`,
                     }}
                   >
                     <div
@@ -331,24 +349,31 @@ export default function WalletStalker() {
                         color: "var(--text-muted)",
                         fontFamily: "var(--font-mono)",
                         textTransform: "uppercase",
-                        letterSpacing: "0.06em",
-                        marginBottom: 6,
+                        letterSpacing: "0.08em",
+                        marginBottom: 10,
                       }}
                     >
                       {stat.label}
                     </div>
                     <div
                       style={{
-                        fontSize: 20,
+                        fontSize: 22,
                         fontFamily: "var(--font-mono)",
-                        fontWeight: 700,
+                        fontWeight: 600,
                         color: stat.color || "var(--text-primary)",
                       }}
                     >
                       {stat.value}
                     </div>
                     {stat.subtext && (
-                      <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 4, fontFamily: "var(--font-body)" }}>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-ghost)",
+                          marginTop: 6,
+                          fontFamily: "var(--font-body)",
+                        }}
+                      >
                         {stat.subtext}
                       </div>
                     )}
@@ -357,90 +382,151 @@ export default function WalletStalker() {
             </div>
           )}
 
-          {/* Section 3: Bot Score Gauge + Factor Breakdown */}
-          {result.classification !== "Insufficient Data" && (
-            <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16 }}>
-              <BotScoreGauge score={result.score} classification={result.classification} />
-              <FactorBreakdown factors={result.factors} />
+          {/* Bot Score + AI Breakdown */}
+          {!metrics?.insufficient && (
+            <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 24 }}>
+              <BotScoreGauge
+                score={classification?.score ?? null}
+                classification={classifying ? null : (classification?.classification ?? null)}
+                confidence={classification?.confidence ?? null}
+                strategy={classification?.strategy ?? null}
+              />
+              <FactorBreakdown
+                classification={classification?.classification ?? null}
+                reasoning={classification?.reasoning ?? null}
+                keySignals={classification?.keySignals ?? null}
+                factors={classification?.factors ?? null}
+                eliminatedBy={classification?.eliminatedBy ?? null}
+                metrics={metrics}
+                loading={classifying}
+                usingFallback={classification?.usingFallback ?? false}
+                hasApiKey={hasApiKey()}
+              />
             </div>
           )}
 
-          {/* Insufficient data notice */}
-          {result.classification === "Insufficient Data" && (
-            <div className="glass-card" style={{ padding: 24, textAlign: "center" }}>
-              <div style={{ fontSize: 36, marginBottom: 12 }}>{"\uD83D\uDCCA"}</div>
-              <h3
+          {/* Re-analyze button (shown after classification) */}
+          {classification && !classifying && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -32 }}>
+              <button
+                onClick={() => {
+                  clearClassificationCache(address);
+                  setClassification(null);
+                  setClassifying(true);
+                  classifyTrader(address.trim(), metrics).then((result) => {
+                    setClassification(result);
+                    setClassifying(false);
+                  });
+                }}
                 style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: 16,
+                  padding: "5px 14px",
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: 500,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.07em",
+                  background: "transparent",
+                  color: "var(--text-muted)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 0,
+                  cursor: "pointer",
+                }}
+              >
+                Re-analyze
+              </button>
+            </div>
+          )}
+
+          {/* Insufficient data */}
+          {metrics?.insufficient && (
+            <div
+              style={{
+                background: "var(--bg-deep)",
+                border: "1px solid var(--border)",
+                borderRadius: 0,
+                padding: 32,
+                textAlign: "center",
+              }}
+            >
+              <p
+                style={{
+                  fontSize: 15,
                   fontWeight: 600,
-                  marginBottom: 8,
+                  fontFamily: "var(--font-display)",
+                  color: "var(--text-primary)",
+                  marginBottom: 6,
                 }}
               >
                 Not Enough Trades for Bot Scoring
-              </h3>
-              <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
-                Found {result.stats.totalTrades} trade(s), but we need at least 5 to run the
-                6-factor analysis. The trade history below shows what we found.
+              </p>
+              <p style={{ fontSize: 14, fontFamily: "var(--font-body)", color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                Found {metrics?.tradeCount || 0} trade(s), but we need at least 5 for analysis.
               </p>
             </div>
           )}
 
-          {/* Section 3.5: Market Category Breakdown */}
-          {result.classification !== "Insufficient Data" && (
+          {/* Market Category Breakdown */}
+          {!metrics?.insufficient && (
             <MarketCategoryBreakdown trades={trades} />
           )}
 
-          {/* Section 4: Activity Heatmap (compact) */}
-          {result.classification !== "Insufficient Data" && trades.length >= 20 && (
+          {/* Activity Heatmap */}
+          {!metrics?.insufficient && trades.length >= 20 && (
             <ActivityHeatmap trades={trades} />
           )}
 
-          {/* Section 5: Copy Trading Simulator */}
-          {result.classification !== "Insufficient Data" && (
+          {/* Copy Trading Simulator */}
+          {!metrics?.insufficient && (
             <CopyTradingSimulator
               trades={trades}
-              positions={positions}
               traderName={traderName || "this trader"}
               marketResolutions={marketResolutions}
               resolutionsLoading={resolutionsLoading}
             />
           )}
 
-          {/* Section 6: Track This Wallet */}
-          {result.classification !== "Insufficient Data" && (
+          {/* Track Wallet */}
+          {!metrics?.insufficient && (
             <WalletTracker
               walletAddress={address}
               walletLabel={traderName}
-              botScore={result?.score}
+              botScore={classification?.score ?? null}
             />
           )}
 
-          {/* Trade history */}
+          {/* Trade history table */}
           {trades.length > 0 && (
-            <div className="glass-card" style={{ padding: 24 }}>
+            <div
+              style={{
+                background: "var(--bg-deep)",
+                border: "1px solid var(--border)",
+                borderRadius: 0,
+                padding: 24,
+              }}
+            >
               <div
                 style={{
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  marginBottom: 16,
+                  marginBottom: 20,
                 }}
               >
                 <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
                     <h3
                       style={{
+                        fontSize: 18,
+                        fontWeight: 700,
                         fontFamily: "var(--font-display)",
-                        fontSize: 15,
-                        fontWeight: 600,
+                        color: "var(--text-primary)",
                       }}
                     >
                       Trade History
                     </h3>
                     <DataBadge status="live" label="REAL TRADES" />
                   </div>
-                  <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  <p style={{ fontSize: 13, fontFamily: "var(--font-body)", color: "var(--text-secondary)" }}>
                     {trades.length} trades fetched from Polymarket Data API
                   </p>
                 </div>
@@ -450,9 +536,7 @@ export default function WalletStalker() {
                 <table
                   style={{
                     width: "100%",
-                    borderCollapse: "separate",
-                    borderSpacing: "0 4px",
-                    fontFamily: "var(--font-body)",
+                    borderCollapse: "collapse",
                   }}
                 >
                   <thead>
@@ -461,15 +545,15 @@ export default function WalletStalker() {
                         <th
                           key={h}
                           style={{
-                            padding: "8px 12px",
+                            padding: "10px 14px",
                             textAlign: "left",
-                            fontSize: 10,
+                            fontSize: 11,
                             fontFamily: "var(--font-mono)",
                             fontWeight: 500,
                             color: "var(--text-muted)",
                             textTransform: "uppercase",
-                            letterSpacing: "0.1em",
-                            borderBottom: "1px solid var(--border-subtle)",
+                            letterSpacing: "0.08em",
+                            borderBottom: "1px solid var(--border)",
                           }}
                         >
                           {h}
@@ -492,15 +576,13 @@ export default function WalletStalker() {
                       return (
                         <tr
                           key={trade.transactionHash || i}
-                          style={{
-                            animation: `fadeInUp 0.3s var(--ease-out) ${i * 20}ms both`,
-                          }}
+                          style={{ borderBottom: "1px solid var(--border)" }}
                         >
                           <td
                             style={{
-                              padding: "10px 12px",
+                              padding: "12px 14px",
                               fontFamily: "var(--font-mono)",
-                              fontSize: 11,
+                              fontSize: 12,
                               color: "var(--text-muted)",
                               whiteSpace: "nowrap",
                             }}
@@ -516,8 +598,9 @@ export default function WalletStalker() {
                           </td>
                           <td
                             style={{
-                              padding: "10px 12px",
-                              fontSize: 12,
+                              padding: "12px 14px",
+                              fontSize: 13,
+                              fontFamily: "var(--font-body)",
                               fontWeight: 500,
                               color: "var(--text-primary)",
                               maxWidth: 280,
@@ -532,18 +615,29 @@ export default function WalletStalker() {
                                 ? trade.conditionId.slice(0, 12) + "..."
                                 : "\u2014")}
                           </td>
-                          <td style={{ padding: "10px 12px" }}>
+                          <td style={{ padding: "12px 14px" }}>
                             <span
-                              className={`badge ${isBuy ? "badge-accent" : "badge-red"}`}
-                              style={{ fontSize: 10 }}
+                              style={{
+                                display: "inline-block",
+                                padding: "3px 10px",
+                                borderRadius: 0,
+                                fontSize: 11,
+                                fontFamily: "var(--font-mono)",
+                                fontWeight: 600,
+                                letterSpacing: "0.04em",
+                                color: isBuy ? "var(--green)" : "var(--red)",
+                                background: isBuy
+                                  ? "rgba(16, 185, 129, 0.1)"
+                                  : "rgba(239, 68, 68, 0.1)",
+                              }}
                             >
                               {side}
                             </span>
                           </td>
                           <td
                             style={{
-                              padding: "10px 12px",
-                              fontSize: 11,
+                              padding: "12px 14px",
+                              fontSize: 12,
                               fontFamily: "var(--font-mono)",
                               color: "var(--text-secondary)",
                             }}
@@ -552,9 +646,9 @@ export default function WalletStalker() {
                           </td>
                           <td
                             style={{
-                              padding: "10px 12px",
+                              padding: "12px 14px",
                               fontFamily: "var(--font-mono)",
-                              fontSize: 12,
+                              fontSize: 13,
                               color: "var(--text-secondary)",
                               whiteSpace: "nowrap",
                             }}
@@ -567,9 +661,9 @@ export default function WalletStalker() {
                           </td>
                           <td
                             style={{
-                              padding: "10px 12px",
+                              padding: "12px 14px",
                               fontFamily: "var(--font-mono)",
-                              fontSize: 12,
+                              fontSize: 13,
                               color: "var(--text-secondary)",
                             }}
                           >
@@ -585,11 +679,31 @@ export default function WalletStalker() {
               </div>
 
               {trades.length > 25 && (
-                <div style={{ textAlign: "center", marginTop: 16 }}>
+                <div style={{ textAlign: "center", marginTop: 20 }}>
                   <button
-                    className="btn-ghost"
                     onClick={() => setShowAllTrades(!showAllTrades)}
-                    style={{ fontSize: 12 }}
+                    style={{
+                      padding: "8px 20px",
+                      fontSize: 12,
+                      fontFamily: "var(--font-mono)",
+                      fontWeight: 500,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      background: "transparent",
+                      color: "var(--text-muted)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 0,
+                      cursor: "pointer",
+                      transition: "all 150ms ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.borderColor = "var(--accent)";
+                      e.target.style.color = "var(--text-primary)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.borderColor = "var(--border)";
+                      e.target.style.color = "var(--text-muted)";
+                    }}
                   >
                     {showAllTrades ? "Show Less" : `Show All ${trades.length} Trades`}
                   </button>
@@ -603,7 +717,6 @@ export default function WalletStalker() {
   );
 }
 
-// ─── Analyze closed trades (buy-sell pairs) ───
 function analyzeClosedTrades(trades) {
   const byMarket = {};
   trades.forEach((t) => {
@@ -655,7 +768,6 @@ function analyzeClosedTrades(trades) {
   return { closedTrades, wins, losses, total, winRate, totalPnl };
 }
 
-// Compute overview statistics — ONLY show what we can verify from API data
 function computeOverviewStats(trades, profile, positions = []) {
   const uniqueMarkets = new Set(trades.map((t) => t.title || t.conditionId)).size;
 
@@ -678,15 +790,10 @@ function computeOverviewStats(trades, profile, positions = []) {
     else dataWindow = `${Math.floor(days)}d`;
   }
 
-  // Analyze closed trades (buy-sell pairs) for win rate
   const analysis = analyzeClosedTrades(trades);
-
-  // Count buys vs sells — reliable, directly from API
   const buys = trades.filter((t) => (t.side || "").toUpperCase() === "BUY").length;
   const sells = trades.filter((t) => (t.side || "").toUpperCase() === "SELL").length;
 
-  // Volume from leaderboard (all-time, most accurate) if available
-  // Otherwise fall back to sum of size×price across available trades
   let volStr = null;
   if (profile?.volume && profile.volume > 0) {
     const v = profile.volume;
@@ -699,9 +806,8 @@ function computeOverviewStats(trades, profile, positions = []) {
   }
   const volSubtext = profile?.volume
     ? "all-time (Polymarket leaderboard)"
-    : trades.length >= 1000 ? "from last 1,000 trades" : null;
+    : trades.length >= 1000 ? `from last ${trades.length.toLocaleString()} trades` : null;
 
-  // All-time P&L from leaderboard — real data from Polymarket
   let pnlStr = null;
   let pnlColor = null;
   if (profile?.pnl != null) {
@@ -709,28 +815,30 @@ function computeOverviewStats(trades, profile, positions = []) {
     pnlStr = p >= 0
       ? `+$${p >= 1_000_000 ? (p / 1_000_000).toFixed(2) + "M" : Math.round(p).toLocaleString()}`
       : `-$${Math.abs(p) >= 1_000_000 ? (Math.abs(p) / 1_000_000).toFixed(2) + "M" : Math.round(Math.abs(p)).toLocaleString()}`;
-    pnlColor = p >= 0 ? "var(--accent)" : "var(--negative)";
+    pnlColor = p >= 0 ? "var(--green)" : "var(--red)";
   }
 
-  // Open positions from /positions endpoint
-  const openPositions = positions.filter((p) => p.curPrice > 0 && !p.redeemable);
+  const openPositions = positions.filter((p) => {
+    const redeemable = p.redeemable === true || p.redeemable === "true";
+    const size = parseFloat(p.size) || 0;
+    return !redeemable && size > 0.01;
+  });
   const unrealizedPnl = openPositions.reduce((sum, p) => sum + (p.cashPnl || 0), 0);
   const openPortfolioValue = openPositions.reduce((sum, p) => sum + (p.currentValue || 0), 0);
 
-  const tradeLabel = trades.length >= 1000 ? "1,000+" : trades.length.toLocaleString();
+  const tradeLabel = trades.length >= 3000 ? "3,000+" : trades.length >= 1000 ? "1,000+" : trades.length.toLocaleString();
   const winRateColor = analysis.winRate !== null
-    ? (analysis.winRate >= 55 ? "var(--accent)" : analysis.winRate <= 45 ? "var(--negative)" : "var(--text-primary)")
+    ? (analysis.winRate >= 55 ? "var(--green)" : analysis.winRate <= 45 ? "var(--red)" : "var(--text-primary)")
     : null;
 
   const stats = [
-    { label: "Total Trades", value: tradeLabel, subtext: trades.length >= 1000 ? "API limit — last 1,000 shown" : null },
+    { label: "Total Trades", value: tradeLabel, subtext: trades.length >= 3000 ? "last 3,000 shown" : trades.length >= 1000 ? "last 1,000 shown" : null },
   ];
 
   if (volStr) {
     stats.push({ label: "Volume", value: volStr, subtext: volSubtext });
   }
 
-  // All-time P&L (only from leaderboard — real Polymarket data)
   if (pnlStr) {
     stats.push({ label: "All-Time P&L", value: pnlStr, color: pnlColor, subtext: "Polymarket leaderboard" });
   }
@@ -739,7 +847,6 @@ function computeOverviewStats(trades, profile, positions = []) {
   stats.push({ label: "Markets Traded", value: uniqueMarkets });
   stats.push({ label: "Data Window", value: dataWindow, subtext: "span of available trades" });
 
-  // Open portfolio (from positions endpoint — real-time)
   if (openPositions.length > 0) {
     const portVal = openPortfolioValue >= 1_000_000
       ? `$${(openPortfolioValue / 1_000_000).toFixed(2)}M`
@@ -750,12 +857,11 @@ function computeOverviewStats(trades, profile, positions = []) {
     stats.push({
       label: "Open Positions",
       value: portVal,
-      color: unrealizedPnl >= 0 ? "var(--accent)" : "var(--negative)",
+      color: unrealizedPnl >= 0 ? "var(--green)" : "var(--red)",
       subtext: `${openPositions.length} open · unrealized ${unrealStr}`,
     });
   }
 
-  // Win rate from closed buy→sell pairs
   if (analysis.winRate !== null) {
     stats.push({
       label: "Win Rate",

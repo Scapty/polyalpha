@@ -1,5 +1,6 @@
 import { fetchLeaderboard, fetchWalletTrades } from "./api";
-import { calculateBotScore } from "./botScoring";
+import { computeWalletMetrics } from "./walletMetrics";
+import { fallbackClassification } from "./traderClassifier";
 import { supabase } from "./supabase";
 
 /**
@@ -57,12 +58,13 @@ export async function refreshLeaderboardCache(onProgress) {
       const { trades } = await fetchWalletTrades(address, 500);
 
       // 3. Score
-      const scoring = calculateBotScore(trades);
+      const walletMetrics = computeWalletMetrics(trades, []);
+      const scoring = fallbackClassification(walletMetrics);
 
       // Compute win rate from trades
       const winRate = computeWinRate(trades);
-      const tradesPerDay = scoring.stats.timeSpanDays > 0
-        ? (scoring.tradeCount / parseFloat(scoring.stats.timeSpanDays)).toFixed(1)
+      const tradesPerDay = walletMetrics.totalDaySpan > 0
+        ? (trades.length / walletMetrics.totalDaySpan).toFixed(1)
         : 0;
 
       const row = {
@@ -71,10 +73,10 @@ export async function refreshLeaderboardCache(onProgress) {
         rank: trader.rank || i + 1,
         pnl: trader.pnl || 0,
         volume: trader.vol || trader.volume || 0,
-        trade_count: scoring.tradeCount,
+        trade_count: trades.length,
         bot_score: scoring.score,
         classification: scoring.classification,
-        factors_json: scoring.factors,
+        factors_json: [],
         win_rate: winRate,
         trades_per_day: parseFloat(tradesPerDay) || 0,
         last_updated: new Date().toISOString(),
@@ -111,8 +113,8 @@ export function computeLeaderboardStats(traders) {
     return { botCount: 0, totalCount: 0, botPnlShare: 0, botAvgWinRate: 0, humanAvgWinRate: 0, botAvgTradesPerDay: 0, humanAvgTradesPerDay: 0 };
   }
 
-  const bots = traders.filter((t) => t.classification === "Likely Bot");
-  const humans = traders.filter((t) => t.classification === "Likely Human");
+  const bots = traders.filter((t) => t.classification === "Bot");
+  const humans = traders.filter((t) => t.classification === "Human");
   const totalPnl = traders.reduce((s, t) => s + Math.abs(parseFloat(t.pnl) || 0), 0);
   const botPnl = bots.reduce((s, t) => s + Math.abs(parseFloat(t.pnl) || 0), 0);
 
@@ -124,7 +126,7 @@ export function computeLeaderboardStats(traders) {
   return {
     botCount: bots.length,
     totalCount: traders.length,
-    uncertainCount: traders.filter((t) => t.classification === "Uncertain").length,
+    uncertainCount: 0,
     humanCount: humans.length,
     botPnlShare: totalPnl > 0 ? ((botPnl / totalPnl) * 100).toFixed(1) : 0,
     botAvgWinRate: avg(bots, "win_rate").toFixed(1),

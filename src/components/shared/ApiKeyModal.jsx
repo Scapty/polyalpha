@@ -21,7 +21,7 @@ export default function ApiKeyModal({ onClose, onSave }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "rgba(0,0,0,0.6)",
+        background: "rgba(0,0,0,0.8)",
         backdropFilter: "blur(8px)",
       }}
       onClick={onClose}
@@ -30,20 +30,20 @@ export default function ApiKeyModal({ onClose, onSave }) {
         className="animate-fade-in-up"
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-lg)",
+          background: "var(--bg-deep)",
+          border: "1px solid var(--border)",
+          borderRadius: 0,
           padding: 32,
-          width: 440,
+          width: 420,
           maxWidth: "90vw",
+          boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
         }}
       >
-        <h3 style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 600, marginBottom: 8 }}>
-          Connect Claude API
+        <h3 style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 500, color: "var(--text-bright)", textTransform: "uppercase", letterSpacing: "0.02em", marginBottom: 8 }}>
+          Connect API
         </h3>
-        <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 20, lineHeight: 1.6 }}>
-          Enter your Anthropic API key to enable live AI analysis. Without a key, the app will use simulated analysis.
-          Your key is stored locally in your browser.
+        <p style={{ fontSize: 13, fontFamily: "var(--font-body)", color: "var(--text-muted)", marginBottom: 20, lineHeight: 1.6 }}>
+          Enter your Anthropic API key to enable live analysis. Your key is stored locally in your browser.
         </p>
         <input
           type="password"
@@ -53,24 +53,31 @@ export default function ApiKeyModal({ onClose, onSave }) {
           onKeyDown={(e) => e.key === "Enter" && handleSave()}
           style={{
             width: "100%",
-            padding: "12px 16px",
-            background: "var(--bg-primary)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius-sm)",
+            height: 48,
+            padding: "0 16px",
+            background: "var(--bg-deep)",
+            border: "1px solid var(--border)",
+            borderRadius: 0,
             color: "var(--text-primary)",
             fontFamily: "var(--font-mono)",
             fontSize: 13,
             outline: "none",
             marginBottom: 20,
-            transition: "border-color 0.2s",
+            transition: "border-color 150ms ease, box-shadow 150ms ease",
           }}
-          onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
-          onBlur={(e) => (e.target.style.borderColor = "var(--border-subtle)")}
+          onFocus={(e) => {
+            e.target.style.borderColor = "var(--accent)";
+            e.target.style.boxShadow = "0 0 20px var(--accent-glow)";
+          }}
+          onBlur={(e) => {
+            e.target.style.borderColor = "var(--border)";
+            e.target.style.boxShadow = "none";
+          }}
           autoFocus
         />
         <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" onClick={handleSave} disabled={!key.trim()}>Save Key</button>
+          <button className="btn-primary" onClick={handleSave} disabled={!key.trim()}>Save key</button>
         </div>
         {hasApiKey() && (
           <button
@@ -79,7 +86,7 @@ export default function ApiKeyModal({ onClose, onSave }) {
               marginTop: 16,
               background: "none",
               border: "none",
-              color: "var(--negative)",
+              color: "var(--red)",
               fontSize: 12,
               cursor: "pointer",
               fontFamily: "var(--font-body)",

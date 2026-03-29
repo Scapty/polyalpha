@@ -1,412 +1,208 @@
-/**
- * 6-Factor Bot Scoring Algorithm v3
- *
- * KEY CHANGES from v2:
- * - Trade Frequency thresholds raised: 10/day is normal for active humans
- * - Timing Precision: 24h coverage alone is NOT a bot signal (pros trade all day)
- * - Sub-minute intervals remain a strong bot signal
- * - Override rules relaxed: need stronger evidence before forcing "Likely Bot"
- * - Classification bands: ≥70 Bot, ≤35 Human (wider Uncertain zone)
- * - Better distinction between "active human trader" and "automated bot"
- */
+import { getMarketCategory } from "./api";
 
-export function calculateBotScore(trades) {
-  if (!trades || trades.length < 5) {
-    return {
-      score: 0,
-      classification: "Insufficient Data",
-      factors: defaultFactors(0),
-      tradeCount: trades?.length || 0,
-      stats: {},
-    };
+export function computeMetrics(activity, positions) {
+  if (!activity || activity.length < 5) {
+    return { insufficient: true, tradeCount: activity?.length || 0 };
   }
 
-  const f1 = calcTradeFrequency(trades);
-  const f2 = calcWinRateConsistency(trades);
-  const f3 = calcTimingPrecision(trades);
-  const f4 = calcSizeUniformity(trades);
-  const f5 = calcMarketDiversity(trades);
-  const f6 = calcHoldingDuration(trades);
+  const timestamps = activity
+    .map(a => {
+      const ts = a.timestamp;
+      return typeof ts === 'number' && ts < 10000000000 ? ts * 1000 : ts;
+    })
+    .filter(t => !isNaN(t))
+    .sort((a, b) => a - b);
 
-  const factors = [
-    { name: "Trade Frequency", weight: 0.25, score: f1.score, detail: f1.detail, icon: "\u26A1" },
-    { name: "Timing Precision", weight: 0.20, score: f3.score, detail: f3.detail, icon: "\u23F1\uFE0F" },
-    { name: "Size Uniformity", weight: 0.15, score: f4.score, detail: f4.detail, icon: "\uD83D\uDCCF" },
-    { name: "Win Rate Consistency", weight: 0.10, score: f2.score, detail: f2.detail, icon: "\uD83C\uDFAF" },
-    { name: "Market Diversity", weight: 0.10, score: f5.score, detail: f5.detail, icon: "\uD83C\uDF10" },
-    { name: "Holding Duration", weight: 0.20, score: f6.score, detail: f6.detail, icon: "\u23F3" },
-  ];
+  const daySpan = Math.max((timestamps[timestamps.length - 1] - timestamps[0]) / 86400000, 0.1);
 
-  const weightedScore = factors.reduce((sum, f) => sum + f.score * f.weight, 0);
-  let score = Math.round(weightedScore);
+  // ── Order clustering: group fills within 30s on same market = 1 order ──
+  let estimatedOrders = 0;
+  let lastMarket = null;
+  let lastTs = 0;
+  const sorted = [...activity].sort((a, b) => {
+    const tsA = typeof a.timestamp === 'number' && a.timestamp < 1e10 ? a.timestamp * 1000 : a.timestamp;
+    const tsB = typeof b.timestamp === 'number' && b.timestamp < 1e10 ? b.timestamp * 1000 : b.timestamp;
+    return tsA - tsB;
+  });
+  sorted.forEach(a => {
+    const market = a.conditionId || a.slug;
+    const ts = typeof a.timestamp === 'number' && a.timestamp < 1e10 ? a.timestamp * 1000 : a.timestamp;
+    if (market !== lastMarket || (ts - lastTs) > 30000) {
+      estimatedOrders++;
+    }
+    lastMarket = market;
+    lastTs = ts;
+  });
+  const estimatedOrdersPerDay = Math.round((estimatedOrders / daySpan) * 10) / 10;
 
-  // === OVERRIDE RULES — only trigger with strong evidence ===
+  // ── Size CV ──
+  const sizes = activity
+    .map(a => parseFloat(a.size || 0) * parseFloat(a.price || 1))
+    .filter(v => v > 0);
+  let sizeCV = null;
+  if (sizes.length >= 5) {
+    const mean = sizes.reduce((a, b) => a + b, 0) / sizes.length;
+    const std = Math.sqrt(sizes.reduce((s, v) => s + (v - mean) ** 2, 0) / sizes.length);
+    sizeCV = mean > 0 ? Math.round((std / mean) * 100) / 100 : null;
+  }
 
-  // Rule 1: Sub-minute trading is only a bot signal if COMBINED with high volume
-  // A human clicking through 15 trades/day can easily have 50% sub-minute
-  // But 100+ trades/day with 50%+ sub-minute = definitely automated
-  if (f1.subMinuteRatio && f1.subMinuteRatio > 0.5 && f1.score >= 75) score = Math.max(score, 80);
-  if (f1.subMinuteRatio && f1.subMinuteRatio > 0.7 && f1.score >= 55) score = Math.max(score, 75);
+  // ── Both-sides trading ──
+  const marketSides = {};
+  activity.forEach(a => {
+    const market = a.conditionId || a.slug || a.title;
+    const outcome = (a.outcome || '').toLowerCase();
+    if (!marketSides[market]) marketSides[market] = new Set();
+    if (outcome) marketSides[market].add(outcome);
+  });
+  const marketsWithBothSides = Object.values(marketSides).filter(s => s.size >= 2).length;
+  const totalUniqueMarkets = Object.keys(marketSides).length;
+  const bothSidesPct = totalUniqueMarkets > 0 ? Math.round(marketsWithBothSides / totalUniqueMarkets * 100) : 0;
 
-  // Rule 2: Trade frequency AND timing precision AND size uniformity all very high
-  // = almost certainly automated
-  if (f1.score >= 85 && f3.score >= 85 && f4.score >= 70) score = Math.max(score, 80);
+  // ── Sleep gap ──
+  const hourCounts = new Array(24).fill(0);
+  timestamps.forEach(t => hourCounts[new Date(t).getUTCHours()]++);
+  const doubled = [...hourCounts, ...hourCounts];
+  let maxGap = 0, curGap = 0;
+  for (let i = 0; i < doubled.length; i++) {
+    if (doubled[i] === 0) { curGap++; maxGap = Math.max(maxGap, curGap); }
+    else curGap = 0;
+  }
+  maxGap = Math.min(maxGap, 24);
 
-  // Rule 3: 4+ factors above 70 = strong bot signal
-  const highFactors = factors.filter((f) => f.score >= 70).length;
-  if (highFactors >= 4) score = Math.max(score, 70);
+  const tradesByDate = {};
+  timestamps.forEach(t => {
+    const date = new Date(t).toISOString().slice(0, 10);
+    const hour = new Date(t).getUTCHours();
+    if (!tradesByDate[date]) tradesByDate[date] = new Set();
+    tradesByDate[date].add(hour);
+  });
+  const activeDays = Object.keys(tradesByDate);
+  const hoursPerDay = activeDays.map(d => tradesByDate[d].size);
+  const avgHoursPerDay = hoursPerDay.length > 0
+    ? Math.round((hoursPerDay.reduce((a, b) => a + b, 0) / hoursPerDay.length) * 10) / 10
+    : 0;
 
-  // Rule 4: Low activity + varied behavior = human
-  if (f1.score <= 30 && f4.score <= 40 && highFactors <= 1) score = Math.min(score, 35);
+  // ── Short-term crypto ──
+  const stcPattern = /\d+.?min|up.or.down|up\/down|hourly/i;
+  const stcCount = activity.filter(a => stcPattern.test(a.title || '') || stcPattern.test(a.slug || '')).length;
+  const shortTermCryptoPct = Math.round(stcCount / activity.length * 100);
 
-  // CLASSIFICATION — wider Uncertain band (36-69)
-  const classification = score >= 70 ? "Likely Bot" : score <= 35 ? "Likely Human" : "Uncertain";
+  // ── Categories ──
+  const categories = {};
+  activity.forEach(a => {
+    const cat = getMarketCategory({ title: a.title, slug: a.slug, eventSlug: a.eventSlug });
+    categories[cat] = (categories[cat] || 0) + 1;
+  });
+  const catPcts = {};
+  Object.entries(categories).forEach(([k, v]) => {
+    catPcts[k] = Math.round(v / activity.length * 100);
+  });
 
-  const timestamps = trades.map((t) => getTimestamp(t)).filter(Boolean).sort();
-  const totalTrades = trades.length;
-  const uniqueMarkets = new Set(trades.map((t) => t.title || t.conditionId || t.market)).size;
-  const timeSpanHours = timestamps.length >= 2 ? (timestamps[timestamps.length - 1] - timestamps[0]) / 3600000 : 0;
+  const buyCount = activity.filter(a => a.side === 'BUY').length;
+  const sellCount = activity.filter(a => a.side === 'SELL').length;
+  const sellRatio = Math.round(sellCount / activity.length * 100);
 
   return {
-    score,
-    classification,
-    factors,
-    tradeCount: totalTrades,
-    stats: {
-      totalTrades,
-      uniqueMarkets,
-      tradesPerHour: timeSpanHours > 0 ? (totalTrades / timeSpanHours).toFixed(1) : "N/A",
-      timeSpanDays: (timeSpanHours / 24).toFixed(1),
-    },
+    insufficient: false,
+    tradeCount: activity.length,
+    apiCapReached: activity.length >= 2900,
+    daySpan: Math.round(daySpan * 10) / 10,
+    sizeCV,
+    bothSidesPct,
+    marketsWithBothSides,
+    totalUniqueMarkets,
+    maxSleepGapHours: maxGap,
+    avgHoursPerDay,
+    hourDistribution: Object.fromEntries(hourCounts.map((c, i) => [String(i), c]).filter(([, c]) => c > 0)),
+    estimatedOrders,
+    estimatedOrdersPerDay,
+    shortTermCryptoPct,
+    categories: catPcts,
+    buyCount,
+    sellCount,
+    sellRatio,
   };
 }
 
-function getTimestamp(trade) {
-  if (trade.match_time) return new Date(trade.match_time).getTime();
-  if (typeof trade.timestamp === "number") {
-    return trade.timestamp > 1e12 ? trade.timestamp : trade.timestamp * 1000;
-  }
-  if (trade.created_at) return new Date(trade.created_at).getTime();
-  return null;
-}
-
-function defaultFactors(score) {
-  return [
-    { name: "Trade Frequency", weight: 0.25, score, detail: "Not enough data", icon: "\u26A1" },
-    { name: "Timing Precision", weight: 0.20, score, detail: "Not enough data", icon: "\u23F1\uFE0F" },
-    { name: "Size Uniformity", weight: 0.15, score, detail: "Not enough data", icon: "\uD83D\uDCCF" },
-    { name: "Win Rate Consistency", weight: 0.10, score, detail: "Not enough data", icon: "\uD83C\uDFAF" },
-    { name: "Market Diversity", weight: 0.10, score, detail: "Not enough data", icon: "\uD83C\uDF10" },
-    { name: "Holding Duration", weight: 0.20, score, detail: "Not enough data", icon: "\u23F3" },
-  ];
-}
-
-// --- Factor Calculations ---
-
-function calcTradeFrequency(trades) {
-  const timestamps = trades.map((t) => getTimestamp(t)).filter(Boolean).sort();
-  if (timestamps.length < 2) return { score: 0, detail: "Single trade", subMinuteRatio: 0 };
-
-  const totalHours = (timestamps[timestamps.length - 1] - timestamps[0]) / 3600000;
-  if (totalHours <= 0) return { score: 98, detail: "All trades in same instant", subMinuteRatio: 1 };
-
-  const totalDays = Math.max(totalHours / 24, 1);
-  const tradesPerDay = trades.length / totalDays;
-
-  // Compute intervals
-  const intervals = [];
-  for (let i = 1; i < timestamps.length; i++) {
-    intervals.push(timestamps[i] - timestamps[i - 1]);
+export function scoreWallet(metrics) {
+  if (metrics.insufficient) {
+    return { score: null, classification: "Insufficient Data", factors: {} };
   }
 
-  // Sub-minute intervals = strong bot signal
-  const subMinute = intervals.filter((iv) => iv < 60000).length;
-  const subMinuteRatio = intervals.length > 0 ? subMinute / intervals.length : 0;
+  // FACTOR 1: Order Volume / Trade Frequency (35%)
+  let f1;
+  const opd = metrics.estimatedOrdersPerDay;
+  if (opd >= 200) f1 = 100;
+  else if (opd >= 100) f1 = 95;
+  else if (opd >= 50) f1 = 85;
+  else if (opd >= 30) f1 = 70;
+  else if (opd >= 15) f1 = 50;
+  else if (opd >= 5) f1 = 25;
+  else f1 = 5;
 
-  // Median interval
-  const sortedIntervals = [...intervals].sort((a, b) => a - b);
-  const medianInterval = sortedIntervals[Math.floor(sortedIntervals.length / 2)];
-  const medianMinutes = medianInterval / 60000;
+  // FACTOR 2: Trading Behavior (25%)
+  let f2 = 30;
+  if (metrics.bothSidesPct >= 70) f2 += 50;
+  else if (metrics.bothSidesPct >= 40) f2 += 35;
+  else if (metrics.bothSidesPct >= 20) f2 += 20;
+  else if (metrics.bothSidesPct <= 5) f2 -= 15;
+  if (metrics.shortTermCryptoPct >= 80) f2 += 30;
+  else if (metrics.shortTermCryptoPct >= 50) f2 += 15;
+  if ((metrics.categories?.Politics || 0) >= 80 && metrics.sellRatio < 5) f2 -= 25;
+  f2 = Math.max(0, Math.min(100, f2));
 
-  // SCORING: realistic thresholds — active humans can do 30+/day
-  let score;
-  if (tradesPerDay >= 200) score = 98;
-  else if (tradesPerDay >= 100) score = 90;
-  else if (tradesPerDay >= 50) score = 75;
-  else if (tradesPerDay >= 30) score = 55;
-  else if (tradesPerDay >= 15) score = 35;
-  else if (tradesPerDay >= 5) score = 20;
-  else score = 10;
+  // FACTOR 3: Size Uniformity (25%)
+  let f3;
+  if (metrics.sizeCV === null) f3 = 50;
+  else if (metrics.sizeCV < 0.05) f3 = 98;
+  else if (metrics.sizeCV < 0.15) f3 = 85;
+  else if (metrics.sizeCV < 0.3) f3 = 70;
+  else if (metrics.sizeCV < 0.6) f3 = 50;
+  else if (metrics.sizeCV < 1.0) f3 = 30;
+  else if (metrics.sizeCV < 2.0) f3 = 15;
+  else f3 = 5;
 
-  // Discount for short timespan: high trades/day over only 1-3 days is less
-  // suspicious than sustained over weeks. Humans have burst days.
-  if (totalDays < 3 && tradesPerDay >= 30) {
-    score = Math.max(10, score - 20);
-  } else if (totalDays < 7 && tradesPerDay >= 30) {
-    score = Math.max(10, score - 10);
+  // FACTOR 4: Activity Pattern (15%)
+  let f4;
+  const gap = metrics.maxSleepGapHours;
+  const hpd = metrics.avgHoursPerDay;
+  if (gap <= 1 && hpd >= 16) f4 = 95;
+  else if (gap <= 2 && hpd >= 12) f4 = 80;
+  else if (gap <= 3) f4 = 65;
+  else if (gap <= 5) f4 = 45;
+  else if (gap >= 6 && hpd <= 8) f4 = 15;
+  else if (gap >= 8) f4 = 5;
+  else f4 = 35;
+
+  const factors = {
+    orderVolume:     { score: f1, weight: 35, detail: `${metrics.estimatedOrdersPerDay} orders/day` },
+    tradingBehavior: { score: f2, weight: 25, detail: `${metrics.bothSidesPct}% both-sides, ${metrics.shortTermCryptoPct}% ST crypto` },
+    sizeUniformity:  { score: f3, weight: 25, detail: `CV ${metrics.sizeCV ?? 'N/A'}` },
+    activityPattern: { score: f4, weight: 15, detail: `${metrics.maxSleepGapHours}h gap, ${metrics.avgHoursPerDay}h/day` },
+  };
+
+  const scores = [f1, f2, f3, f4];
+  const maxScore = Math.max(...scores);
+  const factorsAbove50 = scores.filter(s => s >= 50).length;
+  const weightedScore = Math.round(f1 * 0.35 + f2 * 0.25 + f3 * 0.25 + f4 * 0.15);
+
+  let classification, score;
+  if (maxScore >= 80) {
+    // One overwhelming signal is enough
+    classification = "Bot";
+    score = Math.max(weightedScore, 70);
+  } else if (factorsAbove50 >= 3) {
+    // Three or more moderate signals
+    classification = "Bot";
+    score = Math.max(weightedScore, 60);
+  } else if (factorsAbove50 >= 2 && weightedScore >= 40) {
+    // Two moderate signals AND weighted score confirms it
+    classification = "Bot";
+    score = weightedScore;
+  } else {
+    classification = "Human";
+    score = Math.min(weightedScore, 45);
   }
 
-  // Bonus: sub-minute trading (this is the real bot signal)
-  if (subMinuteRatio > 0.7) score = Math.min(100, score + 15);
-  else if (subMinuteRatio > 0.4) score = Math.min(100, score + 8);
-
-  return {
-    score: Math.min(100, score),
-    detail: `${tradesPerDay.toFixed(1)} trades/day, median interval ${medianMinutes.toFixed(1)}min, ${(subMinuteRatio * 100).toFixed(0)}% sub-minute`,
-    subMinuteRatio,
-  };
-}
-
-function calcWinRateConsistency(trades) {
-  const weeklyResult = calcWinRateByWeeklyWindows(trades);
-  if (weeklyResult) return weeklyResult;
-
-  const prices = trades.map((t) => parseFloat(t.price)).filter((p) => p > 0 && p <= 1);
-  if (prices.length < 5) return { score: 50, detail: "Limited price data" };
-
-  const mean = prices.reduce((a, b) => a + b, 0) / prices.length;
-  const variance = prices.reduce((sum, p) => sum + (p - mean) ** 2, 0) / prices.length;
-  const cv = Math.sqrt(variance) / (mean || 1);
-
-  let score;
-  if (cv < 0.05) score = 90;
-  else if (cv < 0.15) score = 65;
-  else if (cv < 0.3) score = 45;
-  else if (cv < 0.5) score = 30;
-  else score = 15;
-
-  return { score, detail: `Price consistency CV: ${cv.toFixed(3)}` };
-}
-
-function calcWinRateByWeeklyWindows(trades) {
-  const byMarket = {};
-  trades.forEach((t) => {
-    const key = t.title || t.conditionId || t.market || "unknown";
-    if (!byMarket[key]) byMarket[key] = [];
-    byMarket[key].push(t);
-  });
-
-  const resolvedTrades = [];
-  Object.values(byMarket).forEach((marketTrades) => {
-    const sorted = [...marketTrades].sort((a, b) => (getTimestamp(a) || 0) - (getTimestamp(b) || 0));
-    let lastBuy = null;
-    sorted.forEach((t) => {
-      const side = (t.side || "").toUpperCase();
-      if (side === "BUY" || side === "B") {
-        lastBuy = t;
-      } else if ((side === "SELL" || side === "S") && lastBuy) {
-        const buyPrice = parseFloat(lastBuy.price) || 0;
-        const sellPrice = parseFloat(t.price) || 0;
-        resolvedTrades.push({ timestamp: getTimestamp(t), isWin: sellPrice > buyPrice });
-        lastBuy = null;
-      }
-    });
-  });
-
-  if (resolvedTrades.length < 10) return null;
-
-  const windows = {};
-  resolvedTrades.forEach((t) => {
-    if (!t.timestamp) return;
-    const weekKey = Math.floor(t.timestamp / (7 * 24 * 3600000));
-    if (!windows[weekKey]) windows[weekKey] = { wins: 0, total: 0 };
-    windows[weekKey].total++;
-    if (t.isWin) windows[weekKey].wins++;
-  });
-
-  const windowRates = Object.values(windows)
-    .filter((w) => w.total >= 3)
-    .map((w) => w.wins / w.total);
-
-  if (windowRates.length < 2) return null;
-
-  const mean = windowRates.reduce((a, b) => a + b, 0) / windowRates.length;
-  const stddev = Math.sqrt(windowRates.reduce((sum, r) => sum + (r - mean) ** 2, 0) / windowRates.length);
-  const stddevPct = stddev * 100;
-
-  let score;
-  if (stddevPct < 5) score = 85;
-  else if (stddevPct < 10) score = 60;
-  else if (stddevPct < 20) score = 40;
-  else if (stddevPct < 35) score = 25;
-  else score = 15;
-
-  return {
-    score,
-    detail: `Win rate stddev: ${stddevPct.toFixed(1)}% across ${windowRates.length} weekly windows (avg ${(mean * 100).toFixed(0)}%)`,
-  };
-}
-
-function calcTimingPrecision(trades) {
-  const timestamps = trades.map((t) => getTimestamp(t)).filter(Boolean).sort();
-  if (timestamps.length < 3) return { score: 0, detail: "Need more trades" };
-
-  const intervals = [];
-  for (let i = 1; i < timestamps.length; i++) {
-    intervals.push(timestamps[i] - timestamps[i - 1]);
-  }
-
-  const mean = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-  if (mean === 0) return { score: 100, detail: "Zero-interval trades (instant)" };
-
-  const stddev = Math.sqrt(intervals.reduce((sum, iv) => sum + (iv - mean) ** 2, 0) / intervals.length);
-  const cv = stddev / mean;
-
-  // Interval regularity (low CV = very regular = bot-like)
-  let cvScore;
-  if (cv < 0.1) cvScore = 95;
-  else if (cv < 0.3) cvScore = 70;
-  else if (cv < 0.7) cvScore = 45;
-  else if (cv < 1.5) cvScore = 25;
-  else cvScore = 10;
-
-  // Sub-minute percentage (strong bot indicator)
-  const subMinute = intervals.filter((iv) => iv < 60000).length;
-  const subMinutePct = (subMinute / intervals.length) * 100;
-  if (subMinutePct > 60) cvScore = Math.min(100, cvScore + 20);
-  else if (subMinutePct > 30) cvScore = Math.min(100, cvScore + 10);
-
-  // 24h coverage — only a MILD signal (humans can trade all day)
-  const uniqueHours = new Set(timestamps.map((ts) => new Date(ts).getUTCHours())).size;
-  const uniqueDays = new Set(timestamps.map((ts) => {
-    const d = new Date(ts);
-    return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
-  })).size;
-
-  let coverageBonus = 0;
-  if (uniqueDays >= 3 && uniqueHours >= 23) coverageBonus = 15; // 23+ hours over 3+ days is suspicious
-  else if (uniqueDays >= 3 && uniqueHours >= 20) coverageBonus = 8;
-  // No bonus for < 20 hours — that's normal for an active trader
-
-  const finalScore = Math.min(100, cvScore + coverageBonus);
-
-  const avgInterval = mean < 60000
-    ? `${(mean / 1000).toFixed(1)}s`
-    : mean < 3600000
-      ? `${(mean / 60000).toFixed(1)}min`
-      : `${(mean / 3600000).toFixed(1)}hr`;
-
-  return {
-    score: finalScore,
-    detail: `Active ${uniqueHours}/24 hrs over ${uniqueDays} day(s), avg interval: ${avgInterval}, ${subMinutePct.toFixed(0)}% within 1 min`,
-  };
-}
-
-function calcSizeUniformity(trades) {
-  const sizes = trades.map((t) => parseFloat(t.size)).filter((s) => s > 0);
-  if (sizes.length < 3) return { score: 0, detail: "Need more trades with size data" };
-
-  const mean = sizes.reduce((a, b) => a + b, 0) / sizes.length;
-  const stddev = Math.sqrt(sizes.reduce((sum, s) => sum + (s - mean) ** 2, 0) / sizes.length);
-  const cv = stddev / (mean || 1);
-
-  const sizeMap = {};
-  sizes.forEach((s) => {
-    const rounded = Math.round(s * 100) / 100;
-    sizeMap[rounded] = (sizeMap[rounded] || 0) + 1;
-  });
-  const maxRepeats = Math.max(...Object.values(sizeMap));
-  const repeatPct = (maxRepeats / sizes.length) * 100;
-
-  let score;
-  if (cv < 0.03) score = 98;     // nearly identical sizes = very bot-like
-  else if (cv < 0.1) score = 85;
-  else if (cv < 0.25) score = 60;
-  else if (cv < 0.5) score = 35;
-  else score = 15;
-
-  if (repeatPct > 70) score = Math.min(100, score + 10); // very high repeat = bot
-  else if (repeatPct > 40) score = Math.min(100, score + 5);
-
-  const avgDisplay = mean >= 1000 ? `$${(mean / 1000).toFixed(1)}K` : `$${mean.toFixed(0)}`;
-
-  return {
-    score,
-    detail: `Size CV: ${cv.toFixed(2)}, avg: ${avgDisplay}, ${repeatPct.toFixed(0)}% identical sizes`,
-  };
-}
-
-function calcMarketDiversity(trades) {
-  const uniqueMarkets = new Set(trades.map((t) => t.title || t.conditionId || t.market)).size;
-  const timestamps = trades.map((t) => getTimestamp(t)).filter(Boolean).sort();
-
-  const days = timestamps.length >= 2
-    ? (timestamps[timestamps.length - 1] - timestamps[0]) / 86400000
-    : 1;
-
-  const marketsPerDay = uniqueMarkets / Math.max(days, 1);
-
-  // Higher thresholds — active humans follow multiple markets
-  let score;
-  if (marketsPerDay > 20) score = 90;
-  else if (marketsPerDay > 10) score = 70;
-  else if (marketsPerDay > 5) score = 45;
-  else if (marketsPerDay > 2) score = 25;
-  else score = 10;
-
-  return {
-    score,
-    detail: `${uniqueMarkets} markets over ${days.toFixed(1)} days (${marketsPerDay.toFixed(1)}/day)`,
-  };
-}
-
-function calcHoldingDuration(trades) {
-  const byMarket = {};
-  trades.forEach((t) => {
-    const key = t.title || t.conditionId || t.market || "unknown";
-    if (!byMarket[key]) byMarket[key] = [];
-    byMarket[key].push(t);
-  });
-
-  const holdTimes = [];
-  Object.values(byMarket).forEach((marketTrades) => {
-    const sorted = [...marketTrades].sort((a, b) => (getTimestamp(a) || 0) - (getTimestamp(b) || 0));
-    let lastBuy = null;
-    sorted.forEach((t) => {
-      const side = (t.side || "").toUpperCase();
-      const time = getTimestamp(t);
-      if (side === "BUY" || side === "B") {
-        lastBuy = time;
-      } else if ((side === "SELL" || side === "S") && lastBuy) {
-        holdTimes.push(time - lastBuy);
-        lastBuy = null;
-      }
-    });
-  });
-
-  if (holdTimes.length === 0) {
-    const intervals = [];
-    Object.values(byMarket).forEach((marketTrades) => {
-      if (marketTrades.length < 2) return;
-      const times = marketTrades.map((t) => getTimestamp(t)).filter(Boolean).sort();
-      for (let i = 1; i < times.length; i++) intervals.push(times[i] - times[i - 1]);
-    });
-
-    if (intervals.length === 0) return { score: 50, detail: "Cannot determine hold times" };
-
-    const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-    const avgHours = avg / 3600000;
-
-    let score;
-    if (avgHours < 0.05) score = 95;      // < 3 min re-entry = very bot-like
-    else if (avgHours < 0.5) score = 70;
-    else if (avgHours < 4) score = 45;
-    else if (avgHours < 24) score = 25;
-    else score = 10;
-
-    const display = avgHours < 1 ? `${(avgHours * 60).toFixed(0)}min` : `${avgHours.toFixed(1)}hr`;
-    return { score, detail: `Avg market re-entry: ${display}` };
-  }
-
-  const avgHold = holdTimes.reduce((a, b) => a + b, 0) / holdTimes.length / 3600000;
-
-  let score;
-  if (avgHold < 0.05) score = 95;         // < 3 min hold = clearly automated
-  else if (avgHold < 0.5) score = 75;
-  else if (avgHold < 4) score = 45;
-  else if (avgHold < 24) score = 25;
-  else score = 10;
-
-  const display = avgHold < 1 ? `${(avgHold * 60).toFixed(0)}min` : `${avgHold.toFixed(1)}hr`;
-  return { score, detail: `Avg hold: ${display} across ${holdTimes.length} positions` };
+  return { score, classification, factors };
 }

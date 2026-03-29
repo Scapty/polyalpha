@@ -1,29 +1,19 @@
-/**
- * DataBadge — Reusable data source indicator
- * Shows 🟢 LIVE / 🟡 CACHED / 🔴 DEMO with consistent styling
- */
 export default function DataBadge({ status = "demo", label, style }) {
   const configs = {
     live: {
-      color: "#00d4aa",
-      bg: "rgba(0,212,170,0.10)",
-      border: "rgba(0,212,170,0.25)",
+      color: "var(--green)",
+      bg: "var(--green-glow)",
       text: label || "LIVE",
-      dot: "🟢",
     },
     cached: {
-      color: "#ffaa00",
-      bg: "rgba(255,170,0,0.10)",
-      border: "rgba(255,170,0,0.25)",
+      color: "var(--warning)",
+      bg: "var(--warning-dim)",
       text: label || "CACHED",
-      dot: "🟡",
     },
     demo: {
-      color: "#ff4466",
-      bg: "rgba(255,68,102,0.10)",
-      border: "rgba(255,68,102,0.25)",
+      color: "var(--red)",
+      bg: "var(--red-glow)",
       text: label || "DEMO",
-      dot: "🔴",
     },
   };
 
@@ -34,23 +24,22 @@ export default function DataBadge({ status = "demo", label, style }) {
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 4,
-        padding: "2px 8px",
-        borderRadius: 100,
+        gap: 5,
+        padding: "3px 10px",
+        borderRadius: 0,
         background: cfg.bg,
-        border: `1px solid ${cfg.border}`,
-        fontSize: 9,
+        fontSize: 10,
         fontFamily: "var(--font-mono)",
-        fontWeight: 600,
+        fontWeight: 500,
         color: cfg.color,
         textTransform: "uppercase",
-        letterSpacing: "0.08em",
+        letterSpacing: "0.06em",
         lineHeight: 1.6,
         whiteSpace: "nowrap",
         ...style,
       }}
     >
-      <span style={{ fontSize: 7, lineHeight: 1 }}>{cfg.dot}</span>
+      <span style={{ width: 5, height: 5, borderRadius: "50%", background: cfg.color, flexShrink: 0 }} />
       {cfg.text}
     </span>
   );

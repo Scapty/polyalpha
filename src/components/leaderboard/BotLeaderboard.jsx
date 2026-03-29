@@ -53,15 +53,8 @@ export default function BotLeaderboard() {
     setRefreshing(false);
   }
 
-  const classColor = (c) =>
-    c === "Likely Bot" ? "#8b5cf6" : c === "Uncertain" ? "#ffaa00" : "#00d4aa";
-
-  const classBg = (c) =>
-    c === "Likely Bot"
-      ? "rgba(139,92,246,0.12)"
-      : c === "Uncertain"
-        ? "rgba(255,170,0,0.12)"
-        : "rgba(0,212,170,0.12)";
+  const classColor = (c) => c === "Bot" ? "var(--purple)" : "var(--blue)";
+  const classBg = (c) => c === "Bot" ? "rgba(139,92,246,0.12)" : "rgba(59,130,246,0.12)";
 
   const formatPnl = (v) => {
     const n = parseFloat(v) || 0;
@@ -69,182 +62,159 @@ export default function BotLeaderboard() {
     return `${sign}$${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
   };
 
-  // --- Render ---
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      {/* Hero Section */}
-      <div className="glass-card" style={{ padding: 32, textAlign: "center" }}>
+      {/* Header */}
+      <div style={{ animation: "fadeInUp 0.3s ease both" }}>
         <h1
+          className="glow-title"
           style={{
+            fontSize: 48,
             fontFamily: "var(--font-display)",
-            fontSize: 28,
             fontWeight: 700,
+            letterSpacing: "-0.03em",
+            color: "var(--text-primary)",
             marginBottom: 8,
-            letterSpacing: "-0.02em",
           }}
         >
-          Bot Dominance on Polymarket
+          Bot Leaderboard
         </h1>
-        <p style={{ fontSize: 14, color: "var(--text-muted)", marginBottom: 24, maxWidth: 600, margin: "0 auto 24px" }}>
-          Are the top Polymarket traders bots? We scored the top 20 by P&L using our 6-factor algorithm.
+        <p style={{ fontSize: 16, fontFamily: "var(--font-body)", color: "var(--text-secondary)" }}>
+          Top Polymarket traders ranked by volume. Bot classification powered by behavioral analysis.
         </p>
+      </div>
 
-        {stats && traders.length > 0 ? (
-          <>
-            {/* Bot ratio bar */}
-            <div style={{ maxWidth: 500, margin: "0 auto 20px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12, fontFamily: "var(--font-mono)" }}>
-                <span style={{ color: "#8b5cf6" }}>Likely Bot: {stats.botCount}</span>
-                <span style={{ color: "#ffaa00" }}>Uncertain: {stats.uncertainCount}</span>
-                <span style={{ color: "#00d4aa" }}>Likely Human: {stats.humanCount}</span>
-              </div>
-              <div style={{ height: 28, borderRadius: 8, overflow: "hidden", display: "flex", background: "var(--bg-surface)" }}>
-                {stats.botCount > 0 && (
-                  <div style={{ width: `${(stats.botCount / stats.totalCount) * 100}%`, background: "linear-gradient(135deg, #8b5cf6, #7c3aed)", transition: "width 0.5s" }} />
-                )}
-                {stats.uncertainCount > 0 && (
-                  <div style={{ width: `${(stats.uncertainCount / stats.totalCount) * 100}%`, background: "linear-gradient(135deg, #ffaa00, #f59e0b)", transition: "width 0.5s" }} />
-                )}
-                {stats.humanCount > 0 && (
-                  <div style={{ width: `${(stats.humanCount / stats.totalCount) * 100}%`, background: "linear-gradient(135deg, #00d4aa, #00b894)", transition: "width 0.5s" }} />
-                )}
-              </div>
-            </div>
+      {/* Summary line + refresh */}
+      {stats && traders.length > 0 && (
+        <p style={{ fontSize: 14, color: "var(--text-secondary)" }}>
+          {stats.botCount} of {stats.totalCount} top traders classified as bots
+        </p>
+      )}
 
-            {/* Hero stats */}
-            <div style={{ display: "flex", justifyContent: "center", gap: 40, flexWrap: "wrap" }}>
-              <div>
-                <div style={{ fontSize: 36, fontWeight: 700, fontFamily: "var(--font-display)", color: "#8b5cf6" }}>
-                  {stats.botCount} / {stats.totalCount}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>Top Traders are Bots</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 36, fontWeight: 700, fontFamily: "var(--font-display)", color: "#ffaa00" }}>
-                  {stats.botPnlShare}%
-                </div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>Bot Share of Total P&L</div>
-              </div>
-            </div>
-          </>
-        ) : !loading && !refreshing ? (
-          <div style={{ padding: "20px 0" }}>
-            <p style={{ fontSize: 14, color: "var(--text-muted)", marginBottom: 16 }}>
-              No data yet. Click Refresh to score the top 20 traders.
-            </p>
-          </div>
-        ) : null}
-
-        {/* Refresh button + last updated */}
-        <div style={{ marginTop: 20, display: "flex", alignItems: "center", justifyContent: "center", gap: 16 }}>
-          <button
-            className="btn-primary"
-            onClick={handleRefresh}
-            disabled={refreshing}
-            style={{ padding: "10px 24px", fontSize: 13 }}
-          >
-            {refreshing ? "Scoring..." : "Refresh Data"}
-          </button>
-          {lastUpdated && (
-            <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-              Data as of {lastUpdated.toLocaleDateString()} {lastUpdated.toLocaleTimeString()}
-            </span>
-          )}
-        </div>
-
-        {/* Progress bar */}
-        {refreshing && (
-          <div style={{ maxWidth: 400, margin: "16px auto 0" }}>
-            <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 6, fontFamily: "var(--font-mono)" }}>
-              Scoring wallet {progress.current}/{progress.total}
-              {progress.name ? ` (${progress.name})` : ""}...
-            </div>
-            <div style={{ height: 6, borderRadius: 3, background: "var(--bg-surface)", overflow: "hidden" }}>
-              <div
-                style={{
-                  width: `${(progress.current / progress.total) * 100}%`,
-                  height: "100%",
-                  background: "var(--accent)",
-                  borderRadius: 3,
-                  transition: "width 0.3s",
-                }}
-              />
-            </div>
-          </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        <button
+          className="btn-primary"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          style={{ height: 40, padding: "0 24px", fontSize: 13 }}
+        >
+          {refreshing ? "Scoring..." : "Refresh Data"}
+        </button>
+        {lastUpdated && (
+          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+            Data as of {lastUpdated.toLocaleDateString()} {lastUpdated.toLocaleTimeString()}
+          </span>
         )}
       </div>
+
+      {/* Progress */}
+      {refreshing && (
+        <div style={{ maxWidth: 400 }}>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 6, fontFamily: "var(--font-mono)" }}>
+            Scoring wallet {progress.current}/{progress.total}
+            {progress.name ? ` (${progress.name})` : ""}...
+          </div>
+          <div style={{ height: 4, borderRadius: 0, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+            <div
+              style={{
+                width: `${(progress.current / progress.total) * 100}%`,
+                height: "100%",
+                background: "var(--accent)",
+                borderRadius: 0,
+                transition: "width 0.3s ease",
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Loading */}
       {loading && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 0", gap: 12 }}>
-          <div style={{ width: 24, height: 24, borderRadius: "50%", border: "2px solid var(--border-subtle)", borderTopColor: "var(--accent)", animation: "spin 0.8s linear infinite" }} />
+          <div style={{ width: 24, height: 24, borderRadius: "50%", border: "2px solid var(--border)", borderTopColor: "var(--accent)", animation: "spin 0.8s linear infinite" }} />
           <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Loading cached data...</span>
         </div>
       )}
 
+      {/* No data */}
+      {!loading && !refreshing && traders.length === 0 && (
+        <p style={{ fontSize: 14, color: "var(--text-muted)", padding: "20px 0" }}>
+          No data yet. Click Refresh to score the top 20 traders.
+        </p>
+      )}
+
       {/* Summary Stats */}
       {stats && traders.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
-          <StatCard label="Bots Detected" value={`${stats.botCount} / ${stats.totalCount}`} color="#8b5cf6" />
-          <StatCard label="Bot P&L Share" value={`${stats.botPnlShare}%`} color="#ffaa00" />
-          <StatCard
-            label="Avg Win Rate"
-            value={`${stats.botAvgWinRate}% vs ${stats.humanAvgWinRate}%`}
-            sub="Bot vs Human"
-            color="#00d4aa"
-          />
-          <StatCard
-            label="Avg Trades/Day"
-            value={`${stats.botAvgTradesPerDay} vs ${stats.humanAvgTradesPerDay}`}
-            sub="Bot vs Human"
-            color="#3b82f6"
-          />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+          <div className="stat-card">
+            <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Bots Detected</div>
+            <div style={{ fontSize: 20, fontWeight: 500, fontFamily: "var(--font-mono)", color: "var(--purple)" }}>{stats.botCount} / {stats.totalCount}</div>
+          </div>
+          <div className="stat-card">
+            <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Bot P&L Share</div>
+            <div style={{ fontSize: 20, fontWeight: 500, fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{stats.botPnlShare}%</div>
+          </div>
+          <div className="stat-card">
+            <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Avg Win Rate</div>
+            <div style={{ fontSize: 20, fontWeight: 500, fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{stats.botAvgWinRate}% vs {stats.humanAvgWinRate}%</div>
+            <div style={{ fontSize: 10, color: "var(--text-ghost)", marginTop: 2 }}>Bot vs Human</div>
+          </div>
+          <div className="stat-card">
+            <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Avg Trades/Day</div>
+            <div style={{ fontSize: 20, fontWeight: 500, fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{stats.botAvgTradesPerDay} vs {stats.humanAvgTradesPerDay}</div>
+            <div style={{ fontSize: 10, color: "var(--text-ghost)", marginTop: 2 }}>Bot vs Human</div>
+          </div>
         </div>
       )}
 
       {/* Leaderboard Table */}
       {traders.length > 0 && (
-        <div className="glass-card" style={{ padding: 24 }}>
-          <h3 style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 600, marginBottom: 16 }}>
-            Top 20 Traders — Bot Score Analysis
+        <div style={{ background: "var(--bg-deep)", border: "1px solid var(--border)", borderRadius: 0, padding: 24 }}>
+          <h3 style={{ fontSize: 16, fontFamily: "var(--font-display)", fontWeight: 600, color: "var(--text-primary)", marginBottom: 16 }}>
+            Top 20 Traders
           </h3>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr>
-                  {["Rank", "Trader", "Bot Score", "Classification", "P&L", "Win Rate", "Trades/Day"].map((h) => (
+                  {["#", "Trader", "Bot Score", "Classification", "P&L", "Win Rate", "Trades/Day"].map((h) => (
                     <th key={h} style={thStyle}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {traders.map((t) => (
+                {traders.map((t, i) => (
                   <tr
                     key={t.wallet_address}
-                    onClick={() => navigate(`/?address=${t.wallet_address}`)}
+                    onClick={() => navigate(`/wallet-stalker?address=${t.wallet_address}`)}
                     style={{
                       cursor: "pointer",
-                      borderLeft: `3px solid ${classColor(t.classification)}`,
-                      transition: "background 0.15s",
+                      borderBottom: "1px solid var(--border)",
+                      animation: `fadeInUp 0.3s ease ${i * 60}ms both`,
+                      transition: "background 150ms ease",
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.03)")}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                   >
-                    <td style={tdStyle}>#{t.rank}</td>
+                    <td style={tdStyle}>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-muted)" }}>
+                        {t.rank}
+                      </span>
+                    </td>
                     <td style={tdStyle}>
                       <div style={{ display: "flex", flexDirection: "column" }}>
-                        <span style={{ fontWeight: 600, fontSize: 13 }}>{t.display_name}</span>
-                        <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                        <span style={{ fontWeight: 500, fontSize: 13, color: "var(--text-primary)" }}>{t.display_name}</span>
+                        <span style={{ fontSize: 10, color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
                           {t.wallet_address.slice(0, 6)}...{t.wallet_address.slice(-4)}
                         </span>
                       </div>
                     </td>
                     <td style={tdStyle}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <div style={{ width: 60, height: 6, borderRadius: 3, background: "var(--bg-surface)", overflow: "hidden" }}>
-                          <div style={{ width: `${t.bot_score}%`, height: "100%", background: classColor(t.classification), borderRadius: 3 }} />
+                        <div style={{ width: 48, height: 4, borderRadius: 0, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+                          <div style={{ width: `${t.bot_score}%`, height: "100%", background: classColor(t.classification), borderRadius: 0 }} />
                         </div>
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: classColor(t.classification) }}>
+                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 500, color: classColor(t.classification) }}>
                           {t.bot_score}
                         </span>
                       </div>
@@ -254,23 +224,23 @@ export default function BotLeaderboard() {
                         style={{
                           fontSize: 10,
                           padding: "3px 8px",
-                          borderRadius: 4,
+                          borderRadius: 0,
                           background: classBg(t.classification),
                           color: classColor(t.classification),
                           fontWeight: 600,
                           fontFamily: "var(--font-mono)",
                           textTransform: "uppercase",
-                          letterSpacing: "0.05em",
+                          letterSpacing: "0.04em",
                         }}
                       >
-                        {t.classification}
+                        {t.classification || "—"}
                       </span>
                     </td>
-                    <td style={{ ...tdStyle, color: parseFloat(t.pnl) >= 0 ? "var(--accent)" : "var(--negative)", fontWeight: 600 }}>
+                    <td style={{ ...tdStyle, color: parseFloat(t.pnl) >= 0 ? "var(--green)" : "var(--red)", fontWeight: 500, fontFamily: "var(--font-mono)" }}>
                       {formatPnl(t.pnl)}
                     </td>
-                    <td style={{ ...tdStyle, fontFamily: "var(--font-mono)" }}>{t.win_rate}%</td>
-                    <td style={{ ...tdStyle, fontFamily: "var(--font-mono)" }}>{t.trades_per_day}</td>
+                    <td style={{ ...tdStyle, fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>{t.win_rate}%</td>
+                    <td style={{ ...tdStyle, fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>{t.trades_per_day}</td>
                   </tr>
                 ))}
               </tbody>
@@ -284,8 +254,7 @@ export default function BotLeaderboard() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           <ComparisonCard
             title="Bots"
-            icon="🤖"
-            color="#8b5cf6"
+            color="var(--purple)"
             items={[
               { label: "Count", value: stats.botCount },
               { label: "Avg Bot Score", value: stats.botAvgScore },
@@ -296,8 +265,7 @@ export default function BotLeaderboard() {
           />
           <ComparisonCard
             title="Humans"
-            icon="👤"
-            color="#00d4aa"
+            color="var(--blue)"
             items={[
               { label: "Count", value: stats.humanCount },
               { label: "Avg Bot Score", value: stats.humanAvgScore },
@@ -312,31 +280,17 @@ export default function BotLeaderboard() {
   );
 }
 
-// --- Sub-components ---
-
-function StatCard({ label, value, sub, color }) {
+function ComparisonCard({ title, color, items }) {
   return (
-    <div className="stat-card" style={{ textAlign: "center" }}>
-      <div style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-display)", color }}>{value}</div>
-      {sub && <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>{sub}</div>}
-    </div>
-  );
-}
-
-function ComparisonCard({ title, icon, color, items }) {
-  return (
-    <div className="glass-card" style={{ padding: 20 }}>
-      <h4 style={{ fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 600, marginBottom: 14, color, display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 18 }}>{icon}</span> {title}
+    <div style={{ background: "var(--bg-deep)", border: "1px solid var(--border)", borderRadius: 0, padding: 20 }}>
+      <h4 style={{ fontSize: 14, fontFamily: "var(--font-display)", fontWeight: 600, marginBottom: 14, color }}>
+        {title}
       </h4>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {items.map((item) => (
           <div key={item.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{item.label}</span>
-            <span style={{ fontSize: 13, fontWeight: 600, fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+            <span style={{ fontSize: 13, fontWeight: 500, fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
               {item.value}
             </span>
           </div>
@@ -349,17 +303,16 @@ function ComparisonCard({ title, icon, color, items }) {
 const thStyle = {
   padding: "8px 12px",
   textAlign: "left",
-  fontSize: 10,
+  fontSize: 11,
   fontFamily: "var(--font-mono)",
   fontWeight: 500,
   color: "var(--text-muted)",
   textTransform: "uppercase",
-  letterSpacing: "0.1em",
-  borderBottom: "1px solid var(--border-subtle)",
+  letterSpacing: "0.08em",
+  borderBottom: "1px solid var(--border)",
 };
 
 const tdStyle = {
   padding: "10px 12px",
   fontSize: 13,
-  borderBottom: "1px solid rgba(255,255,255,0.04)",
 };

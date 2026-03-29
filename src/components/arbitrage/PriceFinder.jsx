@@ -3,7 +3,7 @@ import { fetchAllKalshiMarkets } from "../../utils/api";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const MAX_SEARCHES_PER_HOUR = 10;
-const CACHE_TTL = 5 * 60 * 1000; // 5 min cache
+const CACHE_TTL = 5 * 60 * 1000;
 
 function getApiKey() {
   return localStorage.getItem("polyalpha_api_key") || "";
@@ -32,7 +32,6 @@ export default function PriceFinder() {
   const [searchesUsed, setSearchesUsed] = useState(getSearchCount());
   const cacheRef = useRef(new Map());
 
-  // Update search count display
   useEffect(() => {
     const id = setInterval(() => setSearchesUsed(getSearchCount()), 10_000);
     return () => clearInterval(id);
@@ -52,7 +51,6 @@ export default function PriceFinder() {
       return;
     }
 
-    // Check cache
     const cacheKey = `${platform}:${query.toLowerCase().trim()}`;
     const cached = cacheRef.current.get(cacheKey);
     if (cached && Date.now() - cached.ts < CACHE_TTL) {
@@ -65,23 +63,16 @@ export default function PriceFinder() {
     setResult(null);
 
     try {
-      // Step 1: Fetch all Kalshi markets
       const { markets: kalshiMarkets } = await fetchAllKalshiMarkets(1000);
       if (kalshiMarkets.length === 0) {
         throw new Error("Could not fetch Kalshi markets. Try again.");
       }
 
-      // Step 2: Build condensed market list for Claude
-      // Group by event to reduce token count
       const eventMap = {};
       for (const m of kalshiMarkets) {
         const ek = m.event_ticker;
         if (!eventMap[ek]) {
-          eventMap[ek] = {
-            event: m.eventTitle,
-            ticker: ek,
-            markets: [],
-          };
+          eventMap[ek] = { event: m.eventTitle, ticker: ek, markets: [] };
         }
         eventMap[ek].markets.push({
           ticker: m.ticker,
@@ -93,10 +84,8 @@ export default function PriceFinder() {
         });
       }
 
-      // Only send events with some volume or relevance (reduce tokens)
       const eventList = Object.values(eventMap).slice(0, 300);
 
-      // Step 3: Ask Claude to find the match
       const prompt = `I want to find the best price for a prediction market bet across platforms.
 
 My current platform: ${platform === "polymarket" ? "Polymarket" : "Kalshi"}
@@ -162,7 +151,6 @@ Return up to 5 matches, best first. If nothing matches at all, set noMatch to tr
 
       const parsed = JSON.parse(jsonMatch[0]);
 
-      // Enrich with Kalshi URLs and arbitrage detection
       const enrichedMatches = (parsed.matches || []).map((m) => {
         const eventTicker = m.kalshiTicker?.split("-").slice(0, -1).join("-") || "";
         const seriesTicker = kalshiMarkets.find((km) => km.ticker === m.kalshiTicker)?.series_ticker || eventTicker;
@@ -199,25 +187,46 @@ Return up to 5 matches, best first. If nothing matches at all, set noMatch to tr
   const remaining = MAX_SEARCHES_PER_HOUR - searchesUsed;
 
   return (
-    <div style={{ animation: "fadeInUp 0.4s var(--ease-out)" }}>
-      {/* Search Box */}
-      <section className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <span style={{ fontSize: 18 }}>&#128269;</span>
-          <h2 style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 600, margin: 0 }}>
-            Cross-Platform Price Finder
-          </h2>
-        </div>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, margin: "0 0 20px 0" }}>
+    <div style={{ animation: "fadeInUp 0.3s ease both" }}>
+      {/* Search */}
+      <section style={{
+        background: "var(--bg-deep)",
+        border: "1px solid var(--border)",
+        borderRadius: 0,
+        padding: 24,
+        marginBottom: 24,
+      }}>
+        <h2 style={{
+          fontSize: 16,
+          fontWeight: 600,
+          fontFamily: "var(--font-display)",
+          color: "var(--text-primary)",
+          marginBottom: 4,
+        }}>
+          Cross-Platform Price Finder
+        </h2>
+        <p style={{
+          color: "var(--text-muted)",
+          fontSize: 13,
+          fontFamily: "var(--font-body)",
+          margin: "0 0 20px 0",
+        }}>
           Search for a bet and find the best price across prediction markets
         </p>
 
-        {/* Platform selector */}
         <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: 12, color: "var(--text-muted)", display: "block", marginBottom: 6 }}>
+          <label style={{
+            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            color: "var(--text-muted)",
+            display: "block",
+            marginBottom: 6,
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+          }}>
             Your platform
           </label>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: 4 }}>
             {[
               { id: "polymarket", label: "Polymarket" },
               { id: "kalshi", label: "Kalshi" },
@@ -229,12 +238,12 @@ Return up to 5 matches, best first. If nothing matches at all, set noMatch to tr
                   padding: "6px 16px",
                   fontSize: 12,
                   fontFamily: "var(--font-mono)",
-                  background: platform === p.id ? "rgba(0,212,170,0.12)" : "rgba(255,255,255,0.04)",
-                  color: platform === p.id ? "var(--accent)" : "var(--text-muted)",
-                  border: `1px solid ${platform === p.id ? "rgba(0,212,170,0.3)" : "var(--border-subtle)"}`,
-                  borderRadius: 6,
+                  background: platform === p.id ? "var(--accent)" : "var(--bg-deep)",
+                  color: platform === p.id ? "#fff" : "var(--text-muted)",
+                  border: "1px solid transparent",
+                  borderRadius: 0,
                   cursor: "pointer",
-                  transition: "all 0.2s ease",
+                  transition: "all 150ms ease",
                 }}
               >
                 {p.label}
@@ -243,59 +252,43 @@ Return up to 5 matches, best first. If nothing matches at all, set noMatch to tr
           </div>
         </div>
 
-        {/* Search input */}
         <div style={{ display: "flex", gap: 8 }}>
-          <div style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius-md)",
-            overflow: "hidden",
-          }}>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              placeholder="e.g. Will Bitcoin exceed $150,000 by June 2026?"
-              style={{
-                flex: 1,
-                background: "transparent",
-                border: "none",
-                outline: "none",
-                color: "var(--text-primary)",
-                fontSize: 14,
-                padding: "12px 16px",
-                fontFamily: "var(--font-body)",
-              }}
-            />
-          </div>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+            placeholder="e.g. Will Bitcoin exceed $150,000 by June 2026?"
+            style={{
+              flex: 1,
+              height: 48,
+              padding: "0 16px",
+              background: "var(--bg-deep)",
+              border: "1px solid var(--border)",
+              borderRadius: 0,
+              color: "var(--text-primary)",
+              fontSize: 14,
+              fontFamily: "var(--font-body)",
+              outline: "none",
+              transition: "border-color 150ms ease",
+            }}
+          />
           <button
             onClick={handleSearch}
             disabled={loading || !query.trim()}
-            style={{
-              padding: "12px 24px",
-              fontSize: 13,
-              fontWeight: 600,
-              fontFamily: "var(--font-body)",
-              background: loading ? "rgba(0,212,170,0.1)" : "var(--accent)",
-              color: loading ? "var(--accent)" : "#000",
-              border: "none",
-              borderRadius: "var(--radius-md)",
-              cursor: loading ? "wait" : "pointer",
-              opacity: !query.trim() ? 0.4 : 1,
-              transition: "all 0.2s ease",
-              whiteSpace: "nowrap",
-            }}
+            className="btn-primary"
+            style={{ height: 48, padding: "0 24px", whiteSpace: "nowrap" }}
           >
             {loading ? "Searching..." : "Find Best Price"}
           </button>
         </div>
 
-        {/* Rate limit */}
-        <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+        <div style={{
+          marginTop: 8,
+          fontSize: 11,
+          color: "var(--text-ghost)",
+          fontFamily: "var(--font-mono)",
+        }}>
           {remaining}/{MAX_SEARCHES_PER_HOUR} searches remaining this hour
           {result?.timestamp && (
             <span style={{ marginLeft: 12 }}>
@@ -305,76 +298,101 @@ Return up to 5 matches, best first. If nothing matches at all, set noMatch to tr
         </div>
       </section>
 
-      {/* Error */}
       {error && (
         <div style={{
           marginBottom: 16,
           padding: "12px 16px",
-          borderRadius: "var(--radius-md)",
-          background: "rgba(255,68,102,0.08)",
-          border: "1px solid rgba(255,68,102,0.2)",
-          color: "var(--negative)",
+          borderRadius: 0,
+          background: "rgba(239,68,68,0.08)",
+          border: "1px solid rgba(239,68,68,0.2)",
+          color: "var(--red)",
           fontSize: 13,
+          fontFamily: "var(--font-body)",
         }}>
           {error}
         </div>
       )}
 
-      {/* Loading */}
       {loading && (
-        <section className="glass-card" style={{ padding: 40, textAlign: "center" }}>
-          <div style={{ fontSize: 14, color: "var(--text-muted)", marginBottom: 8 }}>
+        <section style={{
+          background: "var(--bg-deep)",
+          border: "1px solid var(--border)",
+          borderRadius: 0,
+          padding: 40,
+          textAlign: "center",
+        }}>
+          <p style={{ fontSize: 14, color: "var(--text-secondary)", marginBottom: 4 }}>
             Searching across prediction markets...
-          </div>
-          <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+          </p>
+          <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
             Fetching Kalshi markets and matching with AI
-          </div>
+          </p>
         </section>
       )}
 
-      {/* Results */}
       {result && !loading && (
         <ResultsPanel result={result} />
       )}
 
-      {/* How it works */}
       <div style={{
         marginTop: 24,
         padding: 16,
-        borderRadius: "var(--radius-md)",
-        background: "rgba(0,212,170,0.04)",
-        border: "1px solid rgba(0,212,170,0.12)",
+        borderRadius: 0,
+        background: "var(--bg-deep)",
+        border: "1px solid var(--border)",
+        borderLeft: "3px solid var(--accent)",
       }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", marginBottom: 4, fontFamily: "var(--font-mono)" }}>
-          HOW IT WORKS
+        <div style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: "var(--accent)",
+          marginBottom: 4,
+          fontFamily: "var(--font-mono)",
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+        }}>
+          How it works
         </div>
-        <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
+        <p style={{
+          fontSize: 13,
+          color: "var(--text-muted)",
+          fontFamily: "var(--font-body)",
+          lineHeight: 1.6,
+          margin: 0,
+        }}>
           1. Fetches all open markets from Kalshi's public API.{" "}
           2. AI analyzes your query and finds matching or similar bets.{" "}
           3. Shows side-by-side price comparison with match quality.{" "}
-          <strong style={{ color: "var(--text-secondary)" }}>Always verify resolution conditions</strong> — similar markets on different platforms often have different deadlines or criteria.
-        </div>
+          <strong style={{ color: "var(--text-secondary)" }}>Always verify resolution conditions.</strong>
+        </p>
       </div>
     </div>
   );
 }
 
-// ============================================================
-// RESULTS PANEL
-// ============================================================
-
 function ResultsPanel({ result }) {
   if (result.noMatch) {
     return (
-      <section className="glass-card" style={{ padding: 24 }}>
+      <section style={{
+        background: "var(--bg-deep)",
+        border: "1px solid var(--border)",
+        borderRadius: 0,
+        padding: 24,
+      }}>
         <div style={{ textAlign: "center", padding: "20px 0" }}>
-          <div style={{ fontSize: 15, color: "var(--text-secondary)", marginBottom: 8 }}>
+          <p style={{
+            fontSize: 15,
+            fontWeight: 500,
+            fontFamily: "var(--font-display)",
+            color: "var(--text-primary)",
+            marginBottom: 4,
+          }}>
             No matching market found on Kalshi
-          </div>
+          </p>
           {result.suggestion && (
-            <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
               Suggestion: {result.suggestion}
-            </div>
+            </p>
           )}
         </div>
       </section>
@@ -382,21 +400,31 @@ function ResultsPanel({ result }) {
   }
 
   return (
-    <section className="glass-card" style={{ padding: 24 }}>
+    <section style={{
+      background: "var(--bg-deep)",
+      border: "1px solid var(--border)",
+      borderRadius: 0,
+      padding: 24,
+    }}>
       <div style={{ marginBottom: 16 }}>
-        <h3 style={{ fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 600, margin: 0, color: "var(--text-primary)" }}>
+        <h3 style={{
+          fontSize: 15,
+          fontWeight: 600,
+          fontFamily: "var(--font-display)",
+          margin: 0,
+          color: "var(--text-primary)",
+        }}>
           Results for: "{result.query}"
         </h3>
-        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+        <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
           {result.matches.length} match{result.matches.length !== 1 ? "es" : ""} found on Kalshi
-        </div>
+        </p>
       </div>
 
-      {/* Results table */}
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
-            <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+            <tr style={{ borderBottom: "1px solid var(--border)" }}>
               {["Market", "Match", "YES Bid", "YES Ask", "NO Bid", ""].map((h) => (
                 <th key={h} style={{
                   padding: "8px 12px",
@@ -404,6 +432,7 @@ function ResultsPanel({ result }) {
                   color: "var(--text-muted)",
                   fontWeight: 500,
                   fontSize: 11,
+                  fontFamily: "var(--font-mono)",
                   textTransform: "uppercase",
                   letterSpacing: "0.05em",
                 }}>
@@ -414,31 +443,61 @@ function ResultsPanel({ result }) {
           </thead>
           <tbody>
             {result.matches.map((m, i) => (
-              <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+              <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
                 <td style={{ padding: "10px 12px", maxWidth: 350 }}>
-                  <div style={{ color: "var(--text-primary)", fontSize: 13, fontWeight: 500 }}>
+                  <div style={{
+                    color: "var(--text-primary)",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    fontFamily: "var(--font-body)",
+                  }}>
                     {m.kalshiEventTitle}
                   </div>
                   {m.kalshiOutcome && (
-                    <div style={{ fontSize: 12, color: "var(--accent)", marginTop: 2 }}>
+                    <div style={{
+                      fontSize: 12,
+                      color: "var(--accent-bright)",
+                      marginTop: 2,
+                    }}>
                       {m.kalshiOutcome}
                     </div>
                   )}
-                  <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 3 }}>
+                  <div style={{
+                    fontSize: 11,
+                    color: "var(--text-ghost)",
+                    marginTop: 3,
+                  }}>
                     {m.explanation}
                   </div>
                 </td>
                 <td style={{ padding: "10px 12px" }}>
                   <MatchBadge quality={m.matchQuality} />
                 </td>
-                <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
-                  {m.yesBid > 0 ? `${(m.yesBid * 100).toFixed(1)}¢` : "—"}
+                <td style={{
+                  padding: "10px 12px",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: "var(--text-primary)",
+                }}>
+                  {m.yesBid > 0 ? `${(m.yesBid * 100).toFixed(1)}\u00A2` : "\u2014"}
                 </td>
-                <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
-                  {m.yesAsk > 0 ? `${(m.yesAsk * 100).toFixed(1)}¢` : "—"}
+                <td style={{
+                  padding: "10px 12px",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: "var(--text-primary)",
+                }}>
+                  {m.yesAsk > 0 ? `${(m.yesAsk * 100).toFixed(1)}\u00A2` : "\u2014"}
                 </td>
-                <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: 14, color: "var(--text-muted)" }}>
-                  {m.noBid > 0 ? `${(m.noBid * 100).toFixed(1)}¢` : "—"}
+                <td style={{
+                  padding: "10px 12px",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 14,
+                  color: "var(--text-muted)",
+                }}>
+                  {m.noBid > 0 ? `${(m.noBid * 100).toFixed(1)}\u00A2` : "\u2014"}
                 </td>
                 <td style={{ padding: "10px 8px" }}>
                   <a
@@ -449,15 +508,15 @@ function ResultsPanel({ result }) {
                       padding: "5px 12px",
                       fontSize: 11,
                       fontFamily: "var(--font-mono)",
-                      background: "rgba(0,150,255,0.1)",
-                      color: "#4da6ff",
-                      border: "1px solid rgba(0,150,255,0.2)",
-                      borderRadius: 6,
+                      background: "var(--accent-glow)",
+                      color: "var(--accent-bright)",
+                      border: "none",
+                      borderRadius: 0,
                       textDecoration: "none",
                       whiteSpace: "nowrap",
                     }}
                   >
-                    Kalshi →
+                    Kalshi {"\u2192"}
                   </a>
                 </td>
               </tr>
@@ -466,38 +525,41 @@ function ResultsPanel({ result }) {
         </table>
       </div>
 
-      {/* Best price summary */}
       {result.matches.length > 0 && result.matches[0].matchQuality === "exact" && (
         <div style={{
           marginTop: 16,
           padding: 12,
-          borderRadius: 6,
-          background: "rgba(0,212,170,0.06)",
-          border: "1px solid rgba(0,212,170,0.15)",
+          borderRadius: 0,
+          background: "var(--bg-elevated)",
+          borderLeft: "3px solid var(--accent)",
         }}>
-          <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
+          <p style={{
+            fontSize: 13,
+            color: "var(--text-primary)",
+            fontFamily: "var(--font-body)",
+            margin: 0,
+          }}>
             Best YES price on Kalshi:{" "}
-            <strong style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
-              {result.matches[0].yesAsk > 0 ? `${(result.matches[0].yesAsk * 100).toFixed(1)}¢` : `${(result.matches[0].yesBid * 100).toFixed(1)}¢ bid`}
+            <strong style={{ fontFamily: "var(--font-mono)", color: "var(--accent-bright)" }}>
+              {result.matches[0].yesAsk > 0 ? `${(result.matches[0].yesAsk * 100).toFixed(1)}\u00A2` : `${(result.matches[0].yesBid * 100).toFixed(1)}\u00A2 bid`}
             </strong>
-          </div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-            Compare with your {result.platform === "polymarket" ? "Polymarket" : "Kalshi"} price to see which platform offers a better deal. Always check resolution conditions.
-          </div>
+          </p>
+          <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+            Compare with your {result.platform === "polymarket" ? "Polymarket" : "Kalshi"} price. Always check resolution conditions.
+          </p>
         </div>
       )}
 
-      {/* Warning */}
       <div style={{
         marginTop: 12,
         padding: "8px 12px",
-        borderRadius: 6,
-        background: "rgba(255,170,0,0.06)",
-        border: "1px solid rgba(255,170,0,0.12)",
+        borderRadius: 0,
+        background: "var(--bg-elevated)",
         fontSize: 11,
-        color: "var(--warning)",
+        color: "var(--text-muted)",
+        fontFamily: "var(--font-body)",
       }}>
-        Prices are indicative. Resolution conditions may differ between platforms — always verify before trading.
+        Prices are indicative. Resolution conditions may differ between platforms. Always verify before trading.
       </div>
     </section>
   );
@@ -505,9 +567,9 @@ function ResultsPanel({ result }) {
 
 function MatchBadge({ quality }) {
   const styles = {
-    exact: { bg: "rgba(0,212,170,0.1)", color: "var(--accent)", label: "Exact" },
-    similar: { bg: "rgba(255,170,0,0.1)", color: "var(--warning)", label: "Similar" },
-    related: { bg: "rgba(255,255,255,0.05)", color: "var(--text-muted)", label: "Related" },
+    exact: { bg: "rgba(16,185,129,0.12)", color: "var(--green)", label: "Exact" },
+    similar: { bg: "rgba(245,158,11,0.12)", color: "var(--warning)", label: "Similar" },
+    related: { bg: "var(--bg-elevated)", color: "var(--text-muted)", label: "Related" },
   };
   const s = styles[quality] || styles.related;
   return (
@@ -516,7 +578,7 @@ function MatchBadge({ quality }) {
       fontFamily: "var(--font-mono)",
       fontWeight: 600,
       padding: "3px 8px",
-      borderRadius: 4,
+      borderRadius: 0,
       background: s.bg,
       color: s.color,
       textTransform: "uppercase",

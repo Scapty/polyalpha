@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext, useCallback } from "react";
+import { useState, useCallback, createContext, useContext } from "react";
 
 const ToastContext = createContext(null);
 
@@ -24,21 +24,20 @@ export function ToastProvider({ children }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="toast-enter"
+            className="animate-fade-in-up"
             style={{
-              background: "rgba(17, 19, 24, 0.95)",
-              backdropFilter: "blur(16px)",
-              border: `1px solid ${t.type === "success" ? "rgba(0,212,170,0.2)" : t.type === "error" ? "rgba(255,68,102,0.2)" : "rgba(255,255,255,0.06)"}`,
-              borderRadius: "var(--radius-md)",
+              background: "var(--bg-elevated)",
+              border: `1px solid ${t.type === "success" ? "rgba(16,185,129,0.2)" : t.type === "error" ? "rgba(239,68,68,0.2)" : "var(--border)"}`,
+              borderRadius: 0,
               padding: "12px 20px",
               fontFamily: "var(--font-body)",
               fontSize: 13,
-              color: t.type === "success" ? "var(--accent)" : t.type === "error" ? "var(--negative)" : "var(--text-primary)",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+              color: t.type === "success" ? "var(--green)" : t.type === "error" ? "var(--red)" : "var(--text-primary)",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
               minWidth: 200,
             }}
           >
-            {t.type === "success" ? "✓ " : t.type === "error" ? "✗ " : ""}{t.message}
+            {t.message}
           </div>
         ))}
       </div>

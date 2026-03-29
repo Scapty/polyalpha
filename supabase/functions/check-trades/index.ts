@@ -16,7 +16,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
-const RESEND_FROM = Deno.env.get("RESEND_FROM") || "PolyAlpha <noreply@stembl.com>";
+const RESEND_FROM = Deno.env.get("RESEND_FROM") || "Dexio <noreply@stembl.com>";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -66,7 +66,7 @@ Deno.serve(async (req: Request) => {
               body: JSON.stringify({
                 from: RESEND_FROM,
                 to: wallet.email,
-                subject: `PolyAlpha Alert: ${newTradeCount} new trade${newTradeCount > 1 ? "s" : ""} detected for ${wallet.wallet_address.slice(0, 8)}...`,
+                subject: `Dexio Alert: ${newTradeCount} new trade${newTradeCount > 1 ? "s" : ""} detected for ${wallet.wallet_address.slice(0, 8)}...`,
                 html: emailHtml,
               }),
             });
@@ -191,7 +191,7 @@ function buildAlertEmail(
     <!-- Header -->
     <div style="text-align:center;margin-bottom:32px;">
       <div style="font-size:24px;font-weight:700;color:#00d4aa;letter-spacing:-0.02em;">
-        ◈ PolyAlpha
+        ◈ Dexio
       </div>
       <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-top:6px;">
         Prediction Market Intelligence
@@ -225,7 +225,7 @@ function buildAlertEmail(
 
     <!-- CTA -->
     <div style="text-align:center;margin-bottom:32px;">
-      <a href="https://polyalpha.app/#/wallet-stalker?address=${addr}"
+      <a href="https://dexio.app/#/wallet-stalker?address=${addr}"
          style="display:inline-block;background:#00d4aa;color:#0a0b0d;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:14px;letter-spacing:-0.01em;">
         View Full Analysis →
       </a>
@@ -234,7 +234,7 @@ function buildAlertEmail(
     <!-- Footer -->
     <hr style="border:none;border-top:1px solid #1e2028;margin:0 0 20px;">
     <p style="color:#444;font-size:11px;text-align:center;line-height:1.7;margin:0;">
-      You're receiving this because you tracked this wallet on PolyAlpha.<br/>
+      You're receiving this because you tracked this wallet on Dexio.<br/>
       To stop alerts, remove this wallet from your tracking list.
     </p>
   </div>

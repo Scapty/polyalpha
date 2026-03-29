@@ -12,7 +12,6 @@ export default function WalletTracker({ walletAddress, walletLabel, botScore }) 
   const [submitting, setSubmitting] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
 
-  // On mount (or email change from localStorage), fetch tracked wallets
   useEffect(() => {
     if (email && isValidEmail(email)) {
       fetchTrackedWallets(email);
@@ -47,14 +46,10 @@ export default function WalletTracker({ walletAddress, walletLabel, botScore }) 
       addToast("Tracking service unavailable", "error");
       return;
     }
-
-    // Check rate limit
     if (trackedWallets.length >= MAX_TRACKED) {
       addToast(`Maximum ${MAX_TRACKED} wallets per email`, "error");
       return;
     }
-
-    // Check if already tracking this wallet
     if (trackedWallets.some((w) => w.wallet_address.toLowerCase() === walletAddress.toLowerCase())) {
       addToast("You're already tracking this wallet", "error");
       return;
@@ -78,10 +73,9 @@ export default function WalletTracker({ walletAddress, walletLabel, botScore }) 
         }
       } else {
         localStorage.setItem(LS_KEY, email.trim().toLowerCase());
-        addToast(`Tracking activated! Alerts will be sent to ${email}`, "success");
+        addToast(`Tracking activated for ${email}`, "success");
         await fetchTrackedWallets(email.trim().toLowerCase());
 
-        // Send confirmation email via Edge Function (fire and forget)
         sendConfirmationEmail({
           email: email.trim().toLowerCase(),
           wallet_address: walletAddress,
@@ -117,21 +111,16 @@ export default function WalletTracker({ walletAddress, walletLabel, botScore }) 
     addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : "";
 
   return (
-    <div className="glass-card" style={{ padding: 24 }}>
-      {/* Header */}
+    <div
+      style={{
+        background: "var(--bg-deep)",
+        border: "1px solid var(--border)",
+        borderRadius: 0,
+        padding: 24,
+      }}
+    >
       <div style={{ marginBottom: 16 }}>
-        <h3
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 15,
-            fontWeight: 600,
-            marginBottom: 6,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <span style={{ fontSize: 16 }}>{"\uD83D\uDD14"}</span>
+        <h3 style={{ fontSize: 16, fontFamily: "var(--font-display)", fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
           Track This Wallet
         </h3>
         <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
@@ -139,7 +128,6 @@ export default function WalletTracker({ walletAddress, walletLabel, botScore }) 
         </p>
       </div>
 
-      {/* Email input + submit */}
       <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
         <input
           type="email"
@@ -149,30 +137,30 @@ export default function WalletTracker({ walletAddress, walletLabel, botScore }) 
           onKeyDown={(e) => e.key === "Enter" && handleStartTracking()}
           style={{
             flex: 1,
-            padding: "10px 14px",
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius-sm)",
+            height: 44,
+            padding: "0 14px",
+            background: "var(--bg-deep)",
+            border: "1px solid var(--border)",
+            borderRadius: 0,
             color: "var(--text-primary)",
             fontFamily: "var(--font-mono)",
             fontSize: 13,
             outline: "none",
-            transition: "border-color 0.2s",
+            transition: "border-color 150ms ease",
           }}
           onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
-          onBlur={(e) => (e.target.style.borderColor = "var(--border-subtle)")}
+          onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
         />
         <button
           className="btn-primary"
           onClick={handleStartTracking}
           disabled={submitting || !email.trim()}
-          style={{ padding: "10px 20px", whiteSpace: "nowrap", fontSize: 13 }}
+          style={{ height: 44, padding: "0 20px", whiteSpace: "nowrap", fontSize: 13 }}
         >
           {submitting ? "Saving..." : "Start Tracking"}
         </button>
       </div>
 
-      {/* Tracked wallets list */}
       {trackedWallets.length > 0 && (
         <div>
           <div
@@ -185,9 +173,9 @@ export default function WalletTracker({ walletAddress, walletLabel, botScore }) 
               marginBottom: 10,
             }}
           >
-            Currently tracking: {trackedWallets.length}/{MAX_TRACKED} wallets
+            Tracking: {trackedWallets.length}/{MAX_TRACKED}
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {trackedWallets.map((w) => (
               <div
                 key={w.id}
@@ -196,9 +184,8 @@ export default function WalletTracker({ walletAddress, walletLabel, botScore }) 
                   alignItems: "center",
                   justifyContent: "space-between",
                   padding: "8px 12px",
-                  background: "rgba(255,255,255,0.02)",
-                  borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--border-subtle)",
+                  background: "var(--bg-elevated)",
+                  borderRadius: 0,
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -211,23 +198,11 @@ export default function WalletTracker({ walletAddress, walletLabel, botScore }) 
                       flexShrink: 0,
                     }}
                   />
-                  <span
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 12,
-                      color: "var(--text-secondary)",
-                    }}
-                  >
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-secondary)" }}>
                     {truncateAddr(w.wallet_address)}
                   </span>
                   {w.wallet_label && (
-                    <span
-                      style={{
-                        fontSize: 11,
-                        color: "var(--text-muted)",
-                        fontStyle: "italic",
-                      }}
-                    >
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
                       {w.wallet_label}
                     </span>
                   )}
@@ -239,16 +214,16 @@ export default function WalletTracker({ walletAddress, walletLabel, botScore }) 
                         padding: "2px 6px",
                         background:
                           w.bot_score >= 70
-                            ? "rgba(139,92,246,0.15)"
+                            ? "rgba(139,92,246,0.12)"
                             : w.bot_score >= 40
-                              ? "rgba(255,170,0,0.15)"
-                              : "rgba(0,212,170,0.15)",
+                              ? "rgba(245,158,11,0.12)"
+                              : "rgba(16,185,129,0.12)",
                         color:
                           w.bot_score >= 70
-                            ? "#8b5cf6"
+                            ? "var(--purple)"
                             : w.bot_score >= 40
-                              ? "#ffaa00"
-                              : "var(--accent)",
+                              ? "var(--warning)"
+                              : "var(--green)",
                       }}
                     >
                       Bot: {w.bot_score}
@@ -260,15 +235,15 @@ export default function WalletTracker({ walletAddress, walletLabel, botScore }) 
                   style={{
                     background: "none",
                     border: "none",
-                    color: "var(--text-muted)",
+                    color: "var(--text-ghost)",
                     cursor: "pointer",
                     fontSize: 14,
                     padding: "2px 6px",
-                    borderRadius: 4,
-                    transition: "color 0.2s",
+                    borderRadius: 0,
+                    transition: "color 150ms ease",
                   }}
-                  onMouseEnter={(e) => (e.target.style.color = "var(--negative)")}
-                  onMouseLeave={(e) => (e.target.style.color = "var(--text-muted)")}
+                  onMouseEnter={(e) => (e.target.style.color = "var(--red)")}
+                  onMouseLeave={(e) => (e.target.style.color = "var(--text-ghost)")}
                   title="Stop tracking"
                 >
                   {"\u2715"}
@@ -279,9 +254,8 @@ export default function WalletTracker({ walletAddress, walletLabel, botScore }) 
         </div>
       )}
 
-      {/* Loading state */}
       {loadingList && trackedWallets.length === 0 && (
-        <p style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+        <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
           Loading tracked wallets...
         </p>
       )}

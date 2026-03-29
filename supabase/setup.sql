@@ -1,5 +1,5 @@
 -- ============================================
--- PolyAlpha — Supabase Tables Setup
+-- Dexio — Supabase Tables Setup
 -- Run this in the Supabase SQL Editor
 -- (https://supabase.com/dashboard → your project → SQL Editor)
 -- ============================================
