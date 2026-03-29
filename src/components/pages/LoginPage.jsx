@@ -1,16 +1,39 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "../../utils/supabase";
 
 export default function LoginPage({ onLogin }) {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (email.trim() && password.trim()) {
+    setError("");
+
+    if (!email.trim() || !password.trim()) return;
+
+    // If Supabase is not configured, fall back to demo mode
+    if (!supabase) {
       onLogin?.();
+      return;
     }
+
+    setLoading(true);
+    const { error: authError } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    setLoading(false);
+
+    if (authError) {
+      setError(authError.message);
+      return;
+    }
+
+    onLogin?.();
   };
 
   const inputStyle = {
@@ -102,12 +125,15 @@ export default function LoginPage({ onLogin }) {
                 onFocus={handleFocus} onBlur={handleBlur}
               />
             </div>
+            {error && (
+              <p style={{ fontSize: 13, color: "var(--red)", margin: 0 }}>{error}</p>
+            )}
             <button
               type="submit" className="btn-primary"
-              disabled={!email.trim() || !password.trim()}
+              disabled={!email.trim() || !password.trim() || loading}
               style={{ width: "100%", height: 52, marginTop: 8, fontSize: 13 }}
             >
-              Log In
+              {loading ? "Signing in..." : "Log In"}
             </button>
           </div>
         </form>

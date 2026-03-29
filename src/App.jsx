@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Routes, Route, useLocation, useNavigate, Navigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import Header from "./components/layout/Header";
 import WalletStalker from "./components/wallet/WalletStalker";
@@ -10,6 +10,7 @@ import LoginPage from "./components/pages/LoginPage";
 import SignupPage from "./components/pages/SignupPage";
 import { ToastProvider } from "./components/shared/Toast";
 import BackgroundPaths from "./components/three/BackgroundPaths";
+import { supabase } from "./utils/supabase";
 
 const pathToTab = {
   "/wallet-stalker": "wallet-stalker",
@@ -23,30 +24,62 @@ const tabToPath = {
   "arbitrage-scanner": "/arbitrage-scanner",
 };
 
-
 const pageVariants = {
   initial: { opacity: 0, y: 20, filter: "blur(6px)" },
   animate: { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] } },
   exit: { opacity: 0, y: -10, filter: "blur(4px)", transition: { duration: 0.3, ease: [0.32, 0, 0.67, 0] } },
 };
 
+// Protected route wrapper
+function ProtectedRoute({ isLoggedIn, children }) {
+  if (!isLoggedIn) return <Navigate to="/login" replace />;
+  return children;
+}
+
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    return localStorage.getItem("dexio_logged_in") === "true";
-  });
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+
+  // Listen to Supabase auth state changes
+  useEffect(() => {
+    if (!supabase) {
+      // No Supabase configured — use localStorage fallback (demo mode)
+      setIsLoggedIn(localStorage.getItem("dexio_logged_in") === "true");
+      setAuthReady(true);
+      return;
+    }
+
+    // Check current session on mount
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsLoggedIn(!!session);
+      setAuthReady(true);
+    });
+
+    // Subscribe to auth changes (login, logout, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsLoggedIn(!!session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const activeTab = pathToTab[location.pathname] || "";
   const handleTabChange = (tabId) => navigate(tabToPath[tabId]);
 
   const handleLogin = () => {
-    localStorage.setItem("dexio_logged_in", "true");
+    if (!supabase) {
+      localStorage.setItem("dexio_logged_in", "true");
+    }
     setIsLoggedIn(true);
     navigate("/wallet-stalker");
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
     localStorage.removeItem("dexio_logged_in");
     setIsLoggedIn(false);
     navigate("/");
@@ -56,6 +89,24 @@ export default function App() {
   const isLanding = location.pathname === "/";
   const showHeader = isLoggedIn && !isAuthPage && !isLanding;
 
+  // Show nothing until we know auth state (prevents flash of login page)
+  if (!authReady) {
+    return (
+      <div style={{
+        minHeight: "100vh", display: "flex",
+        alignItems: "center", justifyContent: "center",
+        background: "var(--bg-deep, #0A0A0F)",
+      }}>
+        <div style={{
+          fontFamily: "var(--font-display, 'Space Grotesk')",
+          fontSize: 18, color: "var(--text-muted, #555568)",
+          textTransform: "uppercase", letterSpacing: "0.1em",
+        }}>
+          Loading...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ToastProvider>
@@ -85,11 +136,21 @@ export default function App() {
             >
               <Routes location={location}>
                 <Route path="/" element={<LandingPage />} />
-                <Route path="/login" element={<LoginPage onLogin={handleLogin} />} />
-                <Route path="/signup" element={<SignupPage onLogin={handleLogin} />} />
-                <Route path="/wallet-stalker" element={<WalletStalker />} />
-                <Route path="/agent-tracker" element={<AgentTracker />} />
-                <Route path="/arbitrage-scanner" element={<ArbitrageScanner />} />
+                <Route path="/login" element={
+                  isLoggedIn ? <Navigate to="/wallet-stalker" replace /> : <LoginPage onLogin={handleLogin} />
+                } />
+                <Route path="/signup" element={
+                  isLoggedIn ? <Navigate to="/wallet-stalker" replace /> : <SignupPage onLogin={handleLogin} />
+                } />
+                <Route path="/wallet-stalker" element={
+                  <ProtectedRoute isLoggedIn={isLoggedIn}><WalletStalker /></ProtectedRoute>
+                } />
+                <Route path="/agent-tracker" element={
+                  <ProtectedRoute isLoggedIn={isLoggedIn}><AgentTracker /></ProtectedRoute>
+                } />
+                <Route path="/arbitrage-scanner" element={
+                  <ProtectedRoute isLoggedIn={isLoggedIn}><ArbitrageScanner /></ProtectedRoute>
+                } />
               </Routes>
             </motion.div>
           </AnimatePresence>
