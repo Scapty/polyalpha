@@ -203,7 +203,7 @@ export default function CopyTradingSimulator({
             min={100}
             step={100}
             style={{
-              width: 130, height: 36, padding: "0 12px",
+              width: "100%", maxWidth: 130, minWidth: 80, height: 36, padding: "0 12px",
               background: "var(--bg-deep, #0A0A0F)", border: "1px solid var(--border, rgba(255,255,255,0.06))",
               borderRadius: 0, color: "var(--text-primary, #F0F0F5)",
               fontFamily: "var(--font-mono, 'JetBrains Mono')", fontSize: 13, outline: "none",

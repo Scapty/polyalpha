@@ -20,7 +20,17 @@ const PERIOD_OPTIONS = [
   { label: "30 days", value: "MONTH" },
   { label: "All time", value: "ALL" },
 ];
-const CATEGORIES = ["All", "Crypto", "Politics", "Economics", "Sports", "Pop Culture"];
+// Maps UI labels → Polymarket leaderboard API category enum values
+const CATEGORIES = [
+  { label: "All", value: "OVERALL" },
+  { label: "Crypto", value: "CRYPTO" },
+  { label: "Politics", value: "POLITICS" },
+  { label: "Economics", value: "ECONOMICS" },
+  { label: "Sports", value: "SPORTS" },
+  { label: "Culture", value: "CULTURE" },
+  { label: "Tech", value: "TECH" },
+  { label: "Finance", value: "FINANCE" },
+];
 
 const BOT_COLOR = "#8B5CF6";
 const HUMAN_COLOR = "#3B82F6";
@@ -139,14 +149,15 @@ export default function AgentTracker() {
 
   const [topN, setTopN] = useState(20);
   const [period, setPeriod] = useState("ALL");
-  const [category, setCategory] = useState("All");
+  const [category, setCategory] = useState("OVERALL");
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [traders, setTraders] = useState([]);
   const [lastScan, setLastScan] = useState(null);
-  const [sortBy, setSortBy] = useState("rank");
-  const [sortDir, setSortDir] = useState("asc");
+  const [sortBy, setSortBy] = useState("pnl");
+  const [sortDir, setSortDir] = useState("desc");
   const [error, setError] = useState(null);
+  const [scannedCategory, setScannedCategory] = useState(null); // tracks which category was last scanned
 
   // Load cache on mount
   useEffect(() => {
@@ -165,8 +176,8 @@ export default function AgentTracker() {
     setProgress({ done: 0, total: topN });
 
     try {
-      // 1. Fetch top traders from leaderboard
-      const leaderboard = await fetchTopTraders(topN, period);
+      // 1. Fetch top traders from leaderboard (with category filter from API)
+      const leaderboard = await fetchTopTraders(topN, period, category);
       if (!leaderboard || leaderboard.length === 0) {
         throw new Error("Leaderboard returned no traders.");
       }
@@ -198,29 +209,22 @@ export default function AgentTracker() {
       setTraders(results);
       const now = new Date();
       setLastScan(now);
+      setScannedCategory(category);
       saveTrackerCache(results);
     } catch (err) {
       setError(err.message);
     } finally {
       setScanning(false);
     }
-  }, [topN, period]);
+  }, [topN, period, category]);
 
   // ── Derived data ────────────────────────────────────────────────────────────
 
-  // Filter traders by selected category (>= 20% of trades in that category, or primary category match)
-  const filteredTraders = useMemo(() => {
-    if (category === "All") return traders;
-    return traders.filter((t) => {
-      if (t.primaryCategory === category) return true;
-      const focus = t.categoryDist?.[category] ?? 0;
-      return focus >= 0.2; // at least 20% of trades in this category
-    });
-  }, [traders, category]);
+  const categoryLabel = CATEGORIES.find((c) => c.value === category)?.label || "All";
 
   const aggregates = useMemo(
-    () => computeAggregates(filteredTraders, category),
-    [filteredTraders, category]
+    () => computeAggregates(traders, categoryLabel),
+    [traders, categoryLabel]
   );
 
   const chartData = useMemo(
@@ -235,13 +239,13 @@ export default function AgentTracker() {
   );
 
   const sortedTraders = useMemo(() => {
-    return [...filteredTraders].sort((a, b) => {
+    return [...traders].sort((a, b) => {
       const va = a[sortBy] ?? (sortDir === "asc" ? Infinity : -Infinity);
       const vb = b[sortBy] ?? (sortDir === "asc" ? Infinity : -Infinity);
       if (typeof va === "string") return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
       return sortDir === "asc" ? va - vb : vb - va;
     });
-  }, [filteredTraders, sortBy, sortDir]);
+  }, [traders, sortBy, sortDir]);
 
   function handleSort(col) {
     if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -339,21 +343,21 @@ export default function AgentTracker() {
           <div style={label}>Market type</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {CATEGORIES.map((c) => (
-              <button key={c} onClick={() => setCategory(c)} style={{
+              <button key={c.value} onClick={() => setCategory(c.value)} style={{
                 padding: "6px 12px", fontSize: 12, fontFamily: "var(--font-mono)",
-                fontWeight: category === c ? 700 : 400,
-                background: category === c ? "var(--accent-dim)" : "var(--bg-elevated)",
-                color: category === c ? "var(--accent-bright)" : "var(--text-muted)",
-                border: `1px solid ${category === c ? "var(--accent)" : "var(--border)"}`,
+                fontWeight: category === c.value ? 700 : 400,
+                background: category === c.value ? "var(--accent-dim)" : "var(--bg-elevated)",
+                color: category === c.value ? "var(--accent-bright)" : "var(--text-muted)",
+                border: `1px solid ${category === c.value ? "var(--accent)" : "var(--border)"}`,
                 borderRadius: 0, cursor: "pointer",
               }}>
-                {c}
+                {c.label}
               </button>
             ))}
           </div>
         </div>
 
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           {lastScanLabel && (
             <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
               Last scan: {lastScanLabel}
@@ -373,11 +377,29 @@ export default function AgentTracker() {
           >
             {scanning
               ? `Scanning… ${progress.done}/${progress.total}`
-              : traders.length > 0 ? "Re-scan" : "Scan Now"
+              : traders.length > 0 && scannedCategory !== category ? `Scan ${categoryLabel}` : traders.length > 0 ? "Re-scan" : "Scan Now"
             }
           </button>
         </div>
       </SpotlightCard>
+
+      {/* Stale data hint when category changed */}
+      {traders.length > 0 && scannedCategory !== null && scannedCategory !== category && !scanning && (
+        <div style={{
+          background: "rgba(45, 212, 168, 0.06)", border: "1px solid rgba(45, 212, 168, 0.15)",
+          borderRadius: 0, padding: "10px 16px", fontSize: 12, color: "var(--accent)",
+          fontFamily: "var(--font-mono)", display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <span>Category changed to <strong>{categoryLabel}</strong> — click scan to load new data.</span>
+          <button onClick={handleScan} style={{
+            padding: "4px 14px", fontSize: 11, background: "var(--accent)", color: "var(--bg-void)",
+            border: "none", borderRadius: 0, cursor: "pointer", fontFamily: "var(--font-mono)",
+            fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase",
+          }}>
+            Scan
+          </button>
+        </div>
+      )}
 
       {error && (
         <div style={{
@@ -405,7 +427,7 @@ export default function AgentTracker() {
       {traders.length > 0 && aggregates && (
         <>
           {/* ── Hero stats ───────────────────────────────────────────────── */}
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 160px), 1fr))", gap: 12 }}>
             <HeroCard
               title="Tracked Traders"
               value={aggregates.total}
@@ -432,7 +454,7 @@ export default function AgentTracker() {
           </div>
 
           {/* ── Head-to-head + Category chart ───────────────────────────── */}
-          <div style={{ display: "grid", gridTemplateColumns: chartHasBotData ? "1fr 1fr" : "1fr", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: chartHasBotData ? "repeat(auto-fit, minmax(min(100%, 360px), 1fr))" : "1fr", gap: 16 }}>
 
             {/* Head-to-head */}
             <div style={card}>
@@ -568,7 +590,7 @@ export default function AgentTracker() {
           {/* ── Trader table ─────────────────────────────────────────────── */}
           <div style={card}>
             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 16 }}>
-              Traders — {sortedTraders.length}{category !== "All" ? ` matching "${category}"` : ""}{sortedTraders.length !== traders.length ? ` / ${traders.length} total` : " tracked"}
+              Traders — {sortedTraders.length} tracked{category !== "OVERALL" ? ` (${categoryLabel})` : ""}
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -660,9 +682,9 @@ export default function AgentTracker() {
                 </tbody>
               </table>
             </div>
-            {sortedTraders.length === 0 && category !== "All" && (
+            {sortedTraders.length === 0 && (
               <div style={{ padding: "24px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-                No traders found with significant activity in <strong>{category}</strong> markets. Try "All" or another category.
+                No traders found{category !== "OVERALL" ? ` in ${categoryLabel} markets` : ""}. Try scanning again or switching category.
               </div>
             )}
             <div style={{

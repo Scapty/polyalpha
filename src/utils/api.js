@@ -461,14 +461,15 @@ export async function fetchWalletActivity(address, limit = 100) {
 }
 
 // --- Top Traders (for AI Agent Tracker — all-time PnL ranking) ---
-export async function fetchTopTraders(limit = 20, timePeriod = "ALL") {
-  const cacheKey = `top-traders:${limit}:${timePeriod}`;
+// category: "OVERALL" | "POLITICS" | "SPORTS" | "CRYPTO" | "CULTURE" | "MENTIONS" | "WEATHER" | "ECONOMICS" | "TECH" | "FINANCE"
+export async function fetchTopTraders(limit = 20, timePeriod = "ALL", category = "OVERALL") {
+  const cacheKey = `top-traders:${limit}:${timePeriod}:${category}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
   try {
     const res = await fetchWithRetry(
-      `${LEADERBOARD_API}?limit=${limit}&timePeriod=${timePeriod}&orderBy=PNL`
+      `${LEADERBOARD_API}?limit=${limit}&timePeriod=${timePeriod}&orderBy=PNL&category=${category}`
     );
     const data = await res.json();
     if (!Array.isArray(data) || data.length === 0) throw new Error("Empty");

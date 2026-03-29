@@ -127,7 +127,7 @@ export default function GlowingInput({
               border: "none",
               width: "100%",
               height: 56,
-              padding: "0 160px 0 20px",
+              padding: "0 140px 0 16px",
               color: "#fff",
               fontSize: 14,
               fontFamily: "var(--font-mono)",

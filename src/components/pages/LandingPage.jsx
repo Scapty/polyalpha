@@ -239,7 +239,7 @@ export default function LandingPage() {
           padding: "80px 24px",
           background: "var(--bg-void)",
         }}>
-          <div style={{ maxWidth: 1000, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 32, textAlign: "center" }}>
+          <div style={{ maxWidth: 1000, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 32, textAlign: "center" }}>
             {[
               { n: String(wallets.count), l: "Analysis Tools" },
               { n: String(trades.count), l: "Platforms Connected" },
@@ -276,7 +276,7 @@ export default function LandingPage() {
             </div>
 
             {/* Feature cards */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 2 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 2 }}>
               {FEATURES.map((f, i) => (
                 <FeatureCard key={i} index={String(i + 1).padStart(2, "0")} {...f} />
               ))}
@@ -292,7 +292,7 @@ export default function LandingPage() {
           background: "var(--bg-deep)",
         }}>
           <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 80, alignItems: "start" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "40px 80px", alignItems: "start" }}>
               {/* Left — heading */}
               <div>
                 <span className="section-number">02</span>
@@ -357,7 +357,7 @@ export default function LandingPage() {
               </h2>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 2 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))", gap: 2 }}>
               {DETAILS.map((item, i) => (
                 <div key={i} style={{
                   padding: "32px 28px",
@@ -428,17 +428,20 @@ export default function LandingPage() {
           <div style={{
             maxWidth: 1400, margin: "0 auto",
             display: "flex", justifyContent: "space-between", alignItems: "center",
-            flexWrap: "wrap", gap: 20,
+            flexWrap: "wrap", gap: "20px 40px",
           }}>
             <div>
-              <span style={{
-                fontFamily: "var(--font-display)", fontSize: 18,
-                fontWeight: 500, letterSpacing: "-0.02em",
-                textTransform: "uppercase",
-              }}>
-                <span style={{ color: "var(--text-primary)" }}>Dex</span>
-                <span style={{ color: "var(--accent)" }}>io</span>
-              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <img src="/dexio-logo.svg" alt="Dexio" style={{ width: 24, height: 24 }} />
+                <span style={{
+                  fontFamily: "var(--font-display)", fontSize: 18,
+                  fontWeight: 500, letterSpacing: "-0.02em",
+                  textTransform: "uppercase",
+                }}>
+                  <span style={{ color: "var(--text-primary)" }}>Dex</span>
+                  <span style={{ color: "var(--accent)" }}>io</span>
+                </span>
+              </div>
               <div className="section-label" style={{ marginTop: 6, color: "var(--text-ghost)" }}>
                 FNCE313 Group 7 / SMU Singapore
               </div>

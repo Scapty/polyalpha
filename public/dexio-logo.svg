@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#0A0A0F"/>
+  <!-- Top-left corner bracket -->
+  <rect x="110" y="100" width="180" height="42" rx="0" fill="#2DD4A8"/>
+  <rect x="110" y="100" width="42" height="180" rx="0" fill="#2DD4A8"/>
+  <!-- Center dot -->
+  <rect x="240" y="240" width="38" height="38" fill="#2DD4A8"/>
+  <!-- Bottom-right corner bracket -->
+  <rect x="230" y="340" width="180" height="42" rx="0" fill="#2DD4A8"/>
+  <rect x="368" y="240" width="42" height="142" rx="0" fill="#2DD4A8"/>
+</svg>

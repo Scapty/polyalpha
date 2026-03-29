@@ -56,7 +56,7 @@ export default function SignupPage({ onLogin }) {
       alignItems: "center", justifyContent: "center",
       padding: "40px 24px",
     }}>
-      <div className="animate-fade-in-up" style={{ width: 420, maxWidth: "100%" }}>
+      <div className="animate-fade-in-up" style={{ width: "100%", maxWidth: 420 }}>
         <div style={{ marginBottom: 48 }}>
           <div style={{ marginBottom: 32, cursor: "pointer" }} onClick={() => navigate("/")}>
             <span style={{
@@ -81,7 +81,7 @@ export default function SignupPage({ onLogin }) {
           <div style={{
             background: "var(--bg-deep)",
             border: "1px solid var(--border)",
-            padding: 32,
+            padding: "clamp(16px, 4vw, 32px)",
             display: "flex", flexDirection: "column", gap: 20,
           }}>
             <div>

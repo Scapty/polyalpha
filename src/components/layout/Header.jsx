@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight, ChevronDown, Menu, X } from "lucide-react";
+import { hasApiKey } from "../../utils/aiAgent";
+import ApiKeyModal from "../shared/ApiKeyModal";
 
 const tabs = [
   { id: "wallet-stalker", label: "Wallet Stalker", num: "01" },
@@ -12,7 +14,10 @@ const ACCENT = "#2DD4A8";
 
 export default function Header({ activeTab, onTabChange, onLogout }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [hasKey, setHasKey] = useState(hasApiKey());
   const menuRef = useRef(null);
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   const activeLabel = tabs.find((t) => t.id === activeTab)?.label || "Navigate";
   const activeNum = tabs.find((t) => t.id === activeTab)?.num || "";
@@ -49,9 +54,14 @@ export default function Header({ activeTab, onTabChange, onLogout }) {
         padding: "0 clamp(24px, 3vw, 48px)",
       }}>
         {/* Logo */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <img
+            src="/dexio-logo.svg"
+            alt="Dexio"
+            style={{ width: isMobile ? 22 : 26, height: isMobile ? 22 : 26 }}
+          />
           <span style={{
-            fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 500,
+            fontFamily: "var(--font-display)", fontSize: isMobile ? 14 : 16, fontWeight: 500,
             letterSpacing: "-0.02em", textTransform: "uppercase",
           }}>
             <span style={{ color: "var(--text-primary)" }}>Dex</span>
@@ -80,7 +90,7 @@ export default function Header({ activeTab, onTabChange, onLogout }) {
               {activeNum}
             </span>
             <span style={{
-              fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 500,
+              fontFamily: "var(--font-display)", fontSize: isMobile ? 12 : 14, fontWeight: 500,
               color: "var(--text-bright)", textTransform: "uppercase",
               letterSpacing: "0.04em",
             }}>
@@ -112,7 +122,7 @@ export default function Header({ activeTab, onTabChange, onLogout }) {
                   WebkitBackdropFilter: "blur(24px)",
                   border: "1px solid var(--border)",
                   padding: "16px 12px",
-                  minWidth: 280,
+                  minWidth: isMobile ? 220 : 280,
                   transformOrigin: "top center",
                   zIndex: 1001,
                 }}
@@ -187,8 +197,31 @@ export default function Header({ activeTab, onTabChange, onLogout }) {
           </AnimatePresence>
         </div>
 
-        {/* Right — minimal logout */}
-        <div style={{ display: "flex", alignItems: "center" }}>
+        {/* Right — API key + logout */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          <button
+            onClick={() => setShowKeyModal(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "6px 14px",
+              background: "transparent",
+              border: hasKey ? "1px solid rgba(45, 212, 168, 0.2)" : "1px solid var(--border)",
+              borderRadius: 0,
+              color: hasKey ? "var(--accent)" : "var(--text-ghost)",
+              fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 400,
+              letterSpacing: "0.1em", textTransform: "uppercase",
+              cursor: "pointer", transition: "all 200ms var(--ease-out)",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = hasKey ? "var(--accent)" : "var(--text-muted)"; e.currentTarget.style.color = hasKey ? "var(--accent)" : "var(--text-secondary)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = hasKey ? "rgba(45, 212, 168, 0.2)" : "var(--border)"; e.currentTarget.style.color = hasKey ? "var(--accent)" : "var(--text-ghost)"; }}
+          >
+            <span style={{
+              width: 5, height: 5, borderRadius: "50%",
+              background: hasKey ? "var(--accent)" : "var(--text-ghost)",
+              boxShadow: hasKey ? "0 0 6px rgba(45, 212, 168, 0.4)" : "none",
+            }} />
+            {hasKey ? "API" : "API Key"}
+          </button>
           {onLogout && (
             <button
               onClick={onLogout}
@@ -211,6 +244,9 @@ export default function Header({ activeTab, onTabChange, onLogout }) {
         </div>
       </header>
 
+      {showKeyModal && (
+        <ApiKeyModal onClose={() => setShowKeyModal(false)} onSave={() => setHasKey(hasApiKey())} />
+      )}
     </>
   );
 }

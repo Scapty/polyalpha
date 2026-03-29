@@ -384,7 +384,7 @@ export default function WalletStalker() {
 
           {/* Bot Score + AI Breakdown */}
           {!metrics?.insufficient && (
-            <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 24 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))", gap: 24 }}>
               <BotScoreGauge
                 score={classification?.score ?? null}
                 classification={classifying ? null : (classification?.classification ?? null)}

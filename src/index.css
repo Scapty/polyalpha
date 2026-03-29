@@ -471,6 +471,54 @@ body {
   margin: 0;
 }
 
+/* ═══ Mobile Responsive ═══ */
+@media (max-width: 768px) {
+  :root {
+    --space-section: 56px;
+    --space-block: 32px;
+    --space-element: 20px;
+  }
+
+  /* Page header */
+  .page-header {
+    padding: 0 0 24px 0;
+    margin-bottom: 24px;
+  }
+  .page-header h1 { font-size: 28px; margin-bottom: 8px; }
+  .page-header p { font-size: 14px; }
+
+  /* Stat cards */
+  .stat-card { padding: 16px 18px; }
+
+  /* Buttons — touch-friendly */
+  .btn-primary, .btn-ghost { padding: 10px 18px; font-size: 11px; min-height: 44px; }
+  .bracket-btn { padding: 14px 28px; font-size: 11px; min-height: 44px; }
+
+  /* Section headings */
+  .heading-section { font-size: clamp(22px, 6vw, 32px); }
+  .heading-hero { font-size: clamp(28px, 8vw, 48px); }
+
+  /* Tables — horizontal scroll */
+  table { font-size: 11px; }
+  th, td { padding: 8px 10px !important; }
+
+  /* Recharts */
+  .recharts-wrapper { font-size: 10px; }
+
+  /* Landing How It Works — stack */
+  .landing-reveal .how-grid {
+    grid-template-columns: 1fr !important;
+    gap: 40px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .page-header h1 { font-size: 24px; }
+  .heading-section { font-size: 22px; }
+  .stat-card { padding: 14px; }
+  .section-label { font-size: 10px; }
+}
+
 /* ═══ Print ═══ */
 @media print {
   body { background: white !important; color: #1a1a1a !important; }

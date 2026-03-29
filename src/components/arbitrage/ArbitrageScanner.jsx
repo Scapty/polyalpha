@@ -498,7 +498,7 @@ Respond ONLY in valid JSON:
           </div>
 
           {/* Market titles */}
-          <div style={{ padding: "16px 24px", borderBottom: "1px solid var(--border)", display: "flex", gap: 24 }}>
+          <div style={{ padding: "16px 24px", borderBottom: "1px solid var(--border)", display: "flex", gap: 24, flexWrap: "wrap" }}>
             <div style={{ flex: 1 }}>
               <div style={{ ...sLabel, color: "var(--accent)" }}>Polymarket</div>
               <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text-primary)", fontFamily: "var(--font-body)" }}>{result.polymarket.title || "\u2014"}</div>

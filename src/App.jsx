@@ -71,7 +71,7 @@ export default function App() {
         <main
           style={
             showHeader
-              ? { paddingTop: 72, paddingBottom: 40, paddingLeft: 32, paddingRight: 32, maxWidth: 1400, margin: "0 auto" }
+              ? { paddingTop: 72, paddingBottom: 40, paddingLeft: "clamp(16px, 3vw, 32px)", paddingRight: "clamp(16px, 3vw, 32px)", maxWidth: 1400, margin: "0 auto" }
               : {}
           }
         >
