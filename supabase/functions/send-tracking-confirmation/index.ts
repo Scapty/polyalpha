@@ -136,7 +136,7 @@ function buildConfirmationEmail({
         <div style="width:1px;height:36px;background:#2a2d35;"></div>
         <div>
           <div style="font-size:14px;font-weight:600;color:${classColor};">${classText}</div>
-          <div style="font-size:11px;color:#888;margin-top:2px;">Based on our 6-factor analysis</div>
+          <div style="font-size:11px;color:#888;margin-top:2px;">Based on our 4-factor analysis</div>
         </div>
       </div>`
     : "";

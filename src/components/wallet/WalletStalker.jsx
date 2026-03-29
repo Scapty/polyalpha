@@ -79,7 +79,7 @@ export default function WalletStalker() {
         (tradesResult.trades.length > 0 ? tradesResult.trades[0].name : null);
       if (name) setTraderName(name);
 
-      // Step 1: Compute metrics instantly (sync)
+      // Step 1: Compute metrics (sync) — always set metrics so UI renders
       if (tradesResult.trades.length > 0) {
         const m = computeWalletMetrics(tradesResult.trades, positionsResult.positions);
         setMetrics(m);
@@ -90,14 +90,15 @@ export default function WalletStalker() {
           setClassification(result);
           setClassifying(false);
         });
-      }
 
-      if (tradesResult.trades.length > 0) {
         setResolutionsLoading(true);
         fetchMarketResolutions(tradesResult.trades).then((resMap) => {
           setMarketResolutions(resMap);
           setResolutionsLoading(false);
         });
+      } else {
+        // 0 trades — still set metrics so the results section renders (for WalletTracker)
+        setMetrics({ insufficient: true, tradeCount: 0 });
       }
     } catch (err) {
       console.error("Wallet analysis failed:", err);
@@ -437,8 +438,8 @@ export default function WalletStalker() {
             </div>
           )}
 
-          {/* Insufficient data */}
-          {metrics?.insufficient && (
+          {/* Insufficient data — only show if we have some trades but not enough */}
+          {metrics?.insufficient && metrics?.tradeCount > 0 && (
             <div
               style={{
                 background: "var(--bg-deep)",
@@ -485,8 +486,8 @@ export default function WalletStalker() {
             />
           )}
 
-          {/* Track Wallet */}
-          {!metrics?.insufficient && (
+          {/* Track Wallet — always visible, even with 0 trades */}
+          {address && (
             <WalletTracker
               walletAddress={address}
               walletLabel={traderName}

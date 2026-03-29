@@ -88,7 +88,9 @@ Deno.serve(async (req: Request) => {
           // 6. Log to alert_history
           await supabase.from("alert_history").insert({
             tracked_wallet_id: wallet.id,
-            trade_data: newTrades.slice(0, 10), // store max 10 trades per alert
+            email: wallet.email,
+            wallet_address: wallet.wallet_address,
+            new_trade_count: newTradeCount,
           });
 
           alertsSent++;
