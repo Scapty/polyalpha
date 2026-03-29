@@ -143,7 +143,6 @@ export default function Header({ activeTab, onTabChange, onLogout }) {
                           color: isActive ? ACCENT : "var(--text-primary)",
                           transition: "background 150ms ease",
                         }}
-                        whileHover={{ backgroundColor: "rgba(45, 212, 168, 0.04)" }}
                       >
                         {/* Animated arrow */}
                         <motion.div
