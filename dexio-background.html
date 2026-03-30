@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dexio Background</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #08080D; width: 100vw; height: 100vh; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<script>
+const canvas = document.getElementById('bg');
+const ctx = canvas.getContext('2d');
+
+// High-DPI support
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  ctx.scale(dpr, dpr);
+}
+resize();
+window.addEventListener('resize', resize);
+
+const W = () => window.innerWidth;
+const H = () => window.innerHeight;
+
+// Build path data for one layer
+function buildPaths(position) {
+  const paths = [];
+  for (let i = 0; i < 36; i++) {
+    const ox = i * 5 * position;
+    const oy = i * 6;
+    // Scale factor to map from viewBox (696x316) to screen
+    paths.push({
+      // Control points scaled relative to screen center
+      ox, oy,
+      position,
+      width: 0.5 + i * 0.03,
+      opacity: 0.08 + i * 0.02,
+      speed: 0.0003 + Math.random() * 0.00015,
+      offset: Math.random(), // random start phase
+      id: i
+    });
+  }
+  return paths;
+}
+
+const layer1 = buildPaths(1);
+const layer2 = buildPaths(-1);
+const allPaths = [...layer1, ...layer2];
+
+function drawPath(p, time) {
+  const w = W();
+  const h = H();
+  // Scale from original viewBox 696x316 to screen
+  const sx = w / 696;
+  const sy = h / 316;
+  const s = Math.max(sx, sy); // cover the screen
+  // Center offset
+  const cx = (w - 696 * s) / 2;
+  const cy = (h - 316 * s) / 2;
+
+  const pos = p.position;
+  const i = p.id;
+
+  // Original path points from the JSX component
+  // M-{380 - i*5*pos} -{189 + i*6}
+  // C same same
+  //   -{312 - i*5*pos} {216 - i*6}
+  //   {152 - i*5*pos} {343 - i*6}
+  // C {616 - i*5*pos} {470 - i*6}
+  //   {684 - i*5*pos} {875 - i*6}
+  //   same same
+
+  const x0 = -(380 - i * 5 * pos);
+  const y0 = -(189 + i * 6);
+  const cp1x = -(312 - i * 5 * pos);
+  const cp1y = 216 - i * 6;
+  const cp2x = 152 - i * 5 * pos;
+  const cp2y = 343 - i * 6;
+  const cp3x = 616 - i * 5 * pos;
+  const cp3y = 470 - i * 6;
+  const x3 = 684 - i * 5 * pos;
+  const y3 = 875 - i * 6;
+
+  // Transform to screen coords
+  const tx = (v) => cx + v * s;
+  const ty = (v) => cy + v * s;
+
+  // Animated dash for flowing effect
+  const phase = ((time * p.speed) + p.offset) % 1;
+  // Approximate path length
+  const pathLen = 1800 * s;
+  const dashLen = pathLen * 0.35;
+  const gapLen = pathLen * 0.65;
+
+  ctx.beginPath();
+  ctx.moveTo(tx(x0), ty(y0));
+  ctx.bezierCurveTo(tx(cp1x), ty(cp1y), tx(cp2x), ty(cp2y), tx(cp2x), ty(cp2y));
+  ctx.bezierCurveTo(tx(cp3x), ty(cp3y), tx(x3), ty(y3), tx(x3), ty(y3));
+
+  // Pulse opacity
+  const pulse = 0.5 + 0.5 * Math.sin(phase * Math.PI * 2);
+  const alpha = Math.min(p.opacity * (0.5 + pulse * 0.5), 0.7);
+
+  ctx.strokeStyle = `rgba(45, 212, 168, ${alpha})`;
+  ctx.lineWidth = p.width;
+  ctx.lineCap = 'round';
+
+  ctx.setLineDash([dashLen, gapLen]);
+  ctx.lineDashOffset = -phase * (dashLen + gapLen) * 2;
+
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function animate(time) {
+  ctx.clearRect(0, 0, W(), H());
+  for (const p of allPaths) {
+    drawPath(p, time);
+  }
+  requestAnimationFrame(animate);
+}
+
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

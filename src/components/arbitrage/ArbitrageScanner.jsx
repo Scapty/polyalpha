@@ -30,8 +30,11 @@ export default function ArbitrageScanner() {
   }
 
   function extractKalshiTicker(input) {
-    const m = input.match(/kalshi\.com\/markets\/([^/?#]+)/i);
-    return m ? m[1].toUpperCase() : null;
+    const m = input.match(/kalshi\.com\/markets\/([^?#]+)/i);
+    if (!m) return null;
+    // URL path: /series/subtitle/event-ticker — take the last non-empty segment
+    const segments = m[1].split("/").filter(Boolean);
+    return segments[segments.length - 1].toUpperCase();
   }
 
   const handleSearch = async () => {
@@ -62,8 +65,65 @@ export default function ArbitrageScanner() {
       }
       if (!sourceData) { setError("Could not fetch market data. Check the URL."); return; }
 
-      setSearchStep(`AI finding match on ${otherPlatform}...`);
-      const aiResult = await claudeCall(apiKey, `Find the equivalent prediction market on ${otherPlatform}.
+      // ── Step 1: try direct title → slug lookup (no AI needed) ──────────────
+      const MONTH_EXPAND = {
+        jan: "january", feb: "february", mar: "march", apr: "april",
+        may: "may",     jun: "june",     jul: "july",  aug: "august",
+        sep: "september", oct: "october", nov: "november", dec: "december",
+      };
+
+      function normalizeTitle(title) {
+        // Expand abbreviated months: "Apr 2026" → "April"  (drop year)
+        let t = title.replace(
+          /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{4}\b/gi,
+          (_, mon) => MONTH_EXPAND[mon.toLowerCase()]
+        );
+        // Also expand bare abbreviations without year: "Apr" → "April"
+        t = t.replace(
+          /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b(?!\w)/gi,
+          (_, mon) => MONTH_EXPAND[mon.toLowerCase()]
+        );
+        return t;
+      }
+
+      function titleToPolySlug(title) {
+        return normalizeTitle(title)
+          .toLowerCase()
+          .trim()
+          .replace(/\?+$/, "")
+          .replace(/[^a-z0-9\s-]/g, "")
+          .trim()
+          .replace(/\s+/g, "-");
+      }
+
+      let otherData = null;
+      let aiResult = null;
+
+      if (otherPlatform === "Polymarket") {
+        setSearchStep("Looking up on Polymarket...");
+        const directSlug = titleToPolySlug(sourceData.eventTitle);
+        const directData = await fetchPolymarketAll(directSlug).catch(() => null);
+        if (directData) {
+          otherData = directData;
+          aiResult = {
+            found: true,
+            matchQuality: "exact",
+            explanation: `Direct match found on Polymarket via title lookup.`,
+            slug: directSlug,
+            url: `https://polymarket.com/event/${directSlug}`,
+            title: directData.eventTitle,
+          };
+        }
+      }
+
+      // ── Step 2: AI web search fallback if direct lookup failed ───────────────
+      if (!aiResult) {
+        setSearchStep(`AI finding match on ${otherPlatform}...`);
+        const srcEndDate = sourceData.endDate
+          ? new Date(sourceData.endDate).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+          : null;
+
+        aiResult = await claudeCall(apiKey, `Find the equivalent prediction market on ${otherPlatform}.
 
 Source: ${platform === "polymarket" ? "Polymarket" : "Kalshi"}
 Title: "${sourceData.eventTitle}"
@@ -76,17 +136,12 @@ ${otherPlatform === "Kalshi"
   ? "Kalshi URLs: kalshi.com/markets/TICKER/... → extract TICKER (e.g., KXMLB, KXPRESPERSON)"
   : "Polymarket URLs: polymarket.com/event/SLUG → extract SLUG"}
 
-MATCHING RULES — BE STRICT ON DATES:
-- "exact": Same event, same outcome, same timeframe (within ~2 weeks)
-- "similar": Same event but slightly different deadline (up to ~1 month apart). Same underlying asset/topic.
-- "none": Use this if:
-  • Deadlines are more than 1 month apart (e.g., "end of March" vs "Dec 31" = NONE, not similar)
-  • Different underlying event (e.g., different sport, different election)
-  • Completely unrelated markets
-- DATE IS CRITICAL: "Bitcoin by March 31" vs "Bitcoin by December 31" are NOT the same bet. The timeframe fundamentally changes the probability and price. Mark as "none".
-- When deadlines are close (within a few weeks), use "similar" and the AI analysis will explain the difference.
+MATCHING RULES:
+- "exact": Same event, same outcome, same timeframe
+- "similar": Same event, slightly different deadline (up to ~1 month)
+- "none": Different event, different timeframe, or unrelated
 
-Respond ONLY in valid JSON, nothing else:
+Respond ONLY in valid JSON:
 {
   "found": true or false,
   "title": "title on ${otherPlatform}",
@@ -96,22 +151,25 @@ Respond ONLY in valid JSON, nothing else:
   "explanation": "1-2 sentences"
 }`, 800, true);
 
-      let otherData = null;
-      if (aiResult.found) {
-        setSearchStep(`Fetching ${otherPlatform} prices...`);
-        let ticker = aiResult.seriesTicker || aiResult.eventTicker || null;
-        let slug = aiResult.slug || null;
-        if (!ticker && !slug && aiResult.url) {
-          if (otherPlatform === "Kalshi") {
-            const m = aiResult.url.match(/kalshi\.com\/markets\/([^/?#]+)/i);
-            if (m) ticker = m[1].toUpperCase();
-          } else {
-            const m = aiResult.url.match(/polymarket\.com\/event\/([^/?#]+)/i);
-            if (m) slug = m[1];
+        if (aiResult.found && !otherData) {
+          setSearchStep(`Fetching ${otherPlatform} prices...`);
+          let ticker = aiResult.seriesTicker || aiResult.eventTicker || null;
+          let slug = aiResult.slug || null;
+          if (!ticker && !slug && aiResult.url) {
+            if (otherPlatform === "Kalshi") {
+              const m = aiResult.url.match(/kalshi\.com\/markets\/([^?#]+)/i);
+              if (m) {
+                const segs = m[1].split("/").filter(Boolean);
+                ticker = segs[segs.length - 1].toUpperCase();
+              }
+            } else {
+              const m = aiResult.url.match(/polymarket\.com\/event\/([^/?#]+)/i);
+              if (m) slug = m[1];
+            }
           }
+          if (otherPlatform === "Kalshi" && ticker) otherData = await fetchKalshiAll(ticker);
+          else if (otherPlatform === "Polymarket" && slug) otherData = await fetchPolymarketAll(slug);
         }
-        if (otherPlatform === "Kalshi" && ticker) otherData = await fetchKalshiAll(ticker);
-        else if (otherPlatform === "Polymarket" && slug) otherData = await fetchPolymarketAll(slug);
       }
 
       if (aiResult.found && !otherData) {
@@ -252,24 +310,37 @@ Respond ONLY in valid JSON, nothing else:
   }
 
   async function fetchKalshiAll(seriesOrEventTicker) {
-    let res = await fetch(`/api/kalshi/markets?event_ticker=${seriesOrEventTicker}&status=open&limit=100`);
+    // Determine if this is an event ticker (has date suffix like -26APR) or a series ticker
+    const isEventTicker = /[A-Z]+-\d{2}[A-Z]{3}$|[A-Z]+-\d+$/.test(seriesOrEventTicker);
+    // Extract series ticker = everything before the last dash segment (e.g. KXFEDDECISION from KXFEDDECISION-26APR)
+    const seriesTicker = isEventTicker
+      ? seriesOrEventTicker.replace(/-[^-]+$/, "")
+      : seriesOrEventTicker;
+
+    let res = await fetch(`/api/kalshi/markets?event_ticker=${seriesOrEventTicker}&limit=100`);
     let data = await res.json();
     let markets = data.markets || [];
+
+    // If no markets found, treat as series ticker → fetch events → pick first event
     if (markets.length === 0) {
       const evRes = await fetch(`/api/kalshi/events?series_ticker=${seriesOrEventTicker}&status=open&limit=5`);
       const evData = await evRes.json();
       if (evData.events?.[0]) {
-        res = await fetch(`/api/kalshi/markets?event_ticker=${evData.events[0].event_ticker}&status=open&limit=100`);
+        res = await fetch(`/api/kalshi/markets?event_ticker=${evData.events[0].event_ticker}&limit=100`);
         data = await res.json();
         markets = data.markets || [];
       }
     }
     if (!markets.length) return null;
+
+    // Get event title by scanning the series and matching the event_ticker
     let eventTitle = seriesOrEventTicker;
     try {
-      const evRes = await fetch(`/api/kalshi/events?series_ticker=${seriesOrEventTicker}&status=open&limit=1`);
+      const evRes = await fetch(`/api/kalshi/events?series_ticker=${seriesTicker}&limit=100`);
       const evData = await evRes.json();
-      if (evData.events?.[0]?.title) eventTitle = evData.events[0].title;
+      const match = evData.events?.find(e => e.event_ticker === seriesOrEventTicker);
+      if (match?.title) eventTitle = match.title;
+      else if (evData.events?.[0]?.title) eventTitle = evData.events[0].title;
     } catch {}
     const volume24h = markets.reduce((s, m) => s + (parseFloat(m.volume_24h_fp) || 0), 0);
     const volumeTotal = markets.reduce((s, m) => s + (parseFloat(m.volume_fp) || 0), 0);

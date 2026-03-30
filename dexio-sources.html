@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dexio - Sources</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #08080D;
+    color: #e0e0e0;
+    font-family: 'Inter', -apple-system, sans-serif;
+    min-height: 100vh;
+    padding: 60px 80px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Subtle gradient glow top-left */
+  body::before {
+    content: '';
+    position: absolute;
+    top: -200px;
+    left: -200px;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(45, 212, 168, 0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  /* Subtle gradient glow bottom-right */
+  body::after {
+    content: '';
+    position: absolute;
+    bottom: -200px;
+    right: -200px;
+    width: 500px;
+    height: 500px;
+    background: radial-gradient(circle, rgba(45, 212, 168, 0.04) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 48px;
+    position: relative;
+  }
+
+  .header h1 {
+    font-size: 42px;
+    font-weight: 700;
+    color: #2DD4A8;
+    letter-spacing: -0.5px;
+  }
+
+  .header .line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, rgba(45, 212, 168, 0.4), transparent);
+  }
+
+  .sources-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px 32px;
+    position: relative;
+  }
+
+  .source-item {
+    display: flex;
+    gap: 12px;
+    padding: 14px 18px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    transition: all 0.2s;
+  }
+
+  .source-num {
+    font-size: 13px;
+    font-weight: 600;
+    color: #2DD4A8;
+    min-width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(45, 212, 168, 0.1);
+    border-radius: 6px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .source-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .source-title {
+    font-size: 13.5px;
+    font-weight: 500;
+    color: #f0f0f0;
+    line-height: 1.4;
+  }
+
+  .source-meta {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.35);
+    line-height: 1.3;
+  }
+
+  .source-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-top: 4px;
+    width: fit-content;
+  }
+
+  .tag-news {
+    color: #2DD4A8;
+    background: rgba(45, 212, 168, 0.1);
+  }
+
+  .tag-academic {
+    color: #60a5fa;
+    background: rgba(96, 165, 250, 0.1);
+  }
+
+  .tag-industry {
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.1);
+  }
+
+  .tag-legal {
+    color: #c084fc;
+    background: rgba(192, 132, 252, 0.1);
+  }
+
+  .footer {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .footer-left {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.25);
+  }
+
+  .footer-logo {
+    font-size: 16px;
+    font-weight: 700;
+    color: #2DD4A8;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Sources</h1>
+  <div class="line"></div>
+</div>
+
+<div class="sources-grid">
+
+  <div class="source-item">
+    <div class="source-num">1</div>
+    <div class="source-content">
+      <div class="source-title">25% of Polymarket trading volume may be artificial</div>
+      <div class="source-meta">Finance Yahoo (2026)</div>
+      <div class="source-tag tag-news">News</div>
+    </div>
+  </div>
+
+  <div class="source-item">
+    <div class="source-num">2</div>
+    <div class="source-content">
+      <div class="source-title">Why are Polymarket bettors losing money?</div>
+      <div class="source-meta">Balaji B. — Medium (2026)</div>
+      <div class="source-tag tag-industry">Industry</div>
+    </div>
+  </div>
+
+  <div class="source-item">
+    <div class="source-num">3</div>
+    <div class="source-content">
+      <div class="source-title">Trading bot turns $313 into $438,000 on Polymarket</div>
+      <div class="source-meta">Finbold (2026)</div>
+      <div class="source-tag tag-news">News</div>
+    </div>
+  </div>
+
+  <div class="source-item">
+    <div class="source-num">4</div>
+    <div class="source-content">
+      <div class="source-title">Unravelling the probabilistic forest: Arbitrage in prediction markets</div>
+      <div class="source-meta">Saguillo, J. et al. — arXiv (2025)</div>
+      <div class="source-tag tag-academic">Academic</div>
+    </div>
+  </div>
+
+  <div class="source-item">
+    <div class="source-num">5</div>
+    <div class="source-content">
+      <div class="source-title">Are prediction markets accurate? Evidence from the 2024 U.S. election</div>
+      <div class="source-meta">Clinton, J. & Huang, T. — SocArXiv (2025)</div>
+      <div class="source-tag tag-academic">Academic</div>
+    </div>
+  </div>
+
+  <div class="source-item">
+    <div class="source-num">6</div>
+    <div class="source-content">
+      <div class="source-title">AI bot generates $2.2M in two months on Polymarket</div>
+      <div class="source-meta">Phemex (2026)</div>
+      <div class="source-tag tag-news">News</div>
+    </div>
+  </div>
+
+  <div class="source-item">
+    <div class="source-num">7</div>
+    <div class="source-content">
+      <div class="source-title">Market-making bot profits on Polymarket</div>
+      <div class="source-meta">Binance Square (2026)</div>
+      <div class="source-tag tag-industry">Industry</div>
+    </div>
+  </div>
+
+  <div class="source-item">
+    <div class="source-num">8</div>
+    <div class="source-content">
+      <div class="source-title">Polymarket faces bot dominance, traders urged to seek real experts</div>
+      <div class="source-meta">Phemex (2026)</div>
+      <div class="source-tag tag-news">News</div>
+    </div>
+  </div>
+
+  <div class="source-item">
+    <div class="source-num">9</div>
+    <div class="source-content">
+      <div class="source-title">Polymarket introduces fees on 15-minute crypto bets</div>
+      <div class="source-meta">CoinMarketCap (2026)</div>
+      <div class="source-tag tag-industry">Industry</div>
+    </div>
+  </div>
+
+  <div class="source-item">
+    <div class="source-num">10</div>
+    <div class="source-content">
+      <div class="source-title">AI agents are quietly rewriting prediction market trading</div>
+      <div class="source-meta">CoinDesk (2026)</div>
+      <div class="source-tag tag-news">News</div>
+    </div>
+  </div>
+
+  <div class="source-item">
+    <div class="source-num">11</div>
+    <div class="source-content">
+      <div class="source-title">MrBeast editor banned over betting on unreleased content</div>
+      <div class="source-meta">BBC News (2026)</div>
+      <div class="source-tag tag-news">News</div>
+    </div>
+  </div>
+
+  <div class="source-item">
+    <div class="source-num">12</div>
+    <div class="source-content">
+      <div class="source-title">Kalshi and Polymarket face insider trading scrutiny</div>
+      <div class="source-meta">The Guardian (2026)</div>
+      <div class="source-tag tag-legal">Legal</div>
+    </div>
+  </div>
+
+  <div class="source-item">
+    <div class="source-num">13</div>
+    <div class="source-content">
+      <div class="source-title">From Iran to Taylor Swift: Informed trading in prediction markets</div>
+      <div class="source-meta">Harvard Law School Forum on Corporate Governance (2026)</div>
+      <div class="source-tag tag-academic">Academic</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  <div class="footer-left">FNCE313 — SMU Singapore</div>
+  <div class="footer-logo">DEXIO</div>
+</div>
+
+</body>
+</html>
