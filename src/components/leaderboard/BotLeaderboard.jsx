@@ -239,7 +239,7 @@ export default function BotLeaderboard() {
                     <td style={{ ...tdStyle, color: parseFloat(t.pnl) >= 0 ? "var(--green)" : "var(--red)", fontWeight: 500, fontFamily: "var(--font-mono)" }}>
                       {formatPnl(t.pnl)}
                     </td>
-                    <td style={{ ...tdStyle, fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>{t.win_rate}%</td>
+                    <td style={{ ...tdStyle, fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>{t.win_rate != null ? `${t.win_rate}%` : "N/A"}</td>
                     <td style={{ ...tdStyle, fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>{t.trades_per_day}</td>
                   </tr>
                 ))}

@@ -359,7 +359,7 @@ Respond ONLY in valid JSON:
 
   async function claudeCall(apiKey, prompt, maxTokens, useWebSearch) {
     const body = { model: "claude-sonnet-4-20250514", max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] };
-    if (useWebSearch) body.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }];
+    if (useWebSearch) body.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 1 }];
     const res = await fetch(ANTHROPIC_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },

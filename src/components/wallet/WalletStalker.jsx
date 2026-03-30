@@ -764,7 +764,7 @@ function analyzeClosedTrades(trades) {
   });
 
   const total = wins + losses;
-  const winRate = total >= 3 ? Math.round((wins / total) * 100) : null;
+  const winRate = total >= 1 ? Math.round((wins / total) * 100) : null;
 
   return { closedTrades, wins, losses, total, winRate, totalPnl };
 }
