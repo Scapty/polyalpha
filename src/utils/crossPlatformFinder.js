@@ -149,7 +149,9 @@ Respond ONLY in valid JSON, no markdown, no backticks, no explanation outside th
     "targetTitle": "market title on ${targetPlatform} or null",
     "targetEvent": "event title or null",
     "matchQuality": "exact" | "similar" | "related" | "none",
-    "explanation": "why this is a match (1 sentence)"
+    "explanation": "why this is a match (1 sentence)",
+    "keyDifferences": "if not exact: explain what differs (timeframe, threshold, scope). null if exact match",
+    "recommendation": "actionable advice: can the user treat this as the same bet? what should they watch out for?"
   },
   "comparison": {
     "sourceYes": ${userYesPrice},
@@ -175,14 +177,19 @@ Respond ONLY in valid JSON, no markdown, no backticks, no explanation outside th
       "title": "title",
       "event": "event or empty",
       "yesBid": 0.XX,
-      "relevance": "brief note"
+      "matchQuality": "similar" | "related",
+      "whyShown": "1 sentence: why this market is relevant to the user's bet (e.g. same topic different timeframe, same entity different metric)",
+      "keyDifference": "1 sentence: the critical difference that makes this NOT the same bet"
     }
   ]
 }
 
 Rules:
-- If you find an exact or very similar match, put it in "match" and leave "similarMarkets" empty
-- If no exact match, set match.found=false and list up to 3 related markets in "similarMarkets"
+- "exact" = identical question, same resolution conditions. "similar" = same topic/entity but different timeframe, threshold, or scope. "related" = same broader category but different specific question.
+- ALWAYS populate similarMarkets with up to 3 close matches (even if you found an exact match — the user may want alternatives)
+- Only include markets that genuinely make sense as alternatives. Do NOT pad with loosely related markets.
+- For "similar" matches: the match IS useful but the user must understand the differences before trading
+- For "related" matches: same topic but materially different question — show WHY it's related
 - For arbitrage: check if buying YES on the cheaper platform + NO on the other totals less than $1.00
 - Use the bid prices (what you can actually buy at) for comparison
 - For Polymarket targets: yesPrice is the bid, there is no separate ask

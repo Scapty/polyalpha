@@ -232,11 +232,41 @@ export default function CrossPlatformPriceFinder() {
           {/* Match found — Comparison table */}
           {match?.found && comparison && (
             <div style={{ padding: 16 }}>
-              {/* Match quality badge */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              {/* Match quality badge + explanation */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <MatchBadge quality={match.matchQuality} />
                 <span style={{ fontSize: 13, color: "var(--text-muted)" }}>{match.explanation}</span>
               </div>
+
+              {/* Key differences callout for non-exact matches */}
+              {match.matchQuality !== "exact" && match.keyDifferences && (
+                <div style={{
+                  padding: "10px 14px", borderRadius: 8, marginBottom: 14,
+                  background: match.matchQuality === "similar"
+                    ? "rgba(59,130,246,0.06)" : "rgba(255,170,0,0.06)",
+                  border: `1px solid ${match.matchQuality === "similar"
+                    ? "rgba(59,130,246,0.15)" : "rgba(255,170,0,0.15)"}`,
+                }}>
+                  <div style={{
+                    fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
+                    fontFamily: "var(--font-mono)", marginBottom: 4,
+                    color: match.matchQuality === "similar" ? "var(--human-blue)" : "var(--warning)",
+                  }}>
+                    Key differences
+                  </div>
+                  <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                    {match.keyDifferences}
+                  </div>
+                  {match.recommendation && (
+                    <div style={{
+                      marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.05)",
+                      fontSize: 12, color: "var(--text-muted)", fontStyle: "italic",
+                    }}>
+                      {match.recommendation}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Comparison table */}
               <div style={{ overflowX: "auto" }}>
@@ -391,44 +421,63 @@ export default function CrossPlatformPriceFinder() {
             </div>
           )}
 
-          {/* No match — show similar markets */}
-          {match && !match.found && (
-            <div style={{ padding: 16 }}>
-              <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 12 }}>
-                No exact match found on {targetPlatform}.
-                {similarMarkets.length > 0 && " Similar markets found:"}
+          {/* No match — message */}
+          {match && !match.found && similarMarkets.length === 0 && (
+            <div style={{ padding: 16, fontSize: 13, color: "var(--text-dim)" }}>
+              This market may not have an equivalent on {targetPlatform}.
+            </div>
+          )}
+
+          {/* Similar/alternative markets — always shown when available */}
+          {similarMarkets.length > 0 && (
+            <div style={{ padding: 16, borderTop: match?.found ? "1px solid var(--border-subtle)" : "none" }}>
+              <div style={{
+                fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
+                fontFamily: "var(--font-mono)", color: "var(--text-muted)", marginBottom: 10,
+              }}>
+                {match?.found ? "Other similar markets" : "Closest matches found"}
               </div>
-              {similarMarkets.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {similarMarkets.map((m, i) => (
-                    <div key={m.ticker || i} style={{
-                      padding: "10px 14px", borderRadius: 8,
-                      background: "rgba(255,255,255,0.02)", border: "1px solid var(--border-subtle)",
-                      fontSize: 13,
-                    }}>
-                      <div style={{ color: "var(--text-primary)", marginBottom: 2 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {similarMarkets.map((m, i) => (
+                  <div key={m.ticker || i} style={{
+                    padding: "12px 14px", borderRadius: 8,
+                    background: "rgba(255,255,255,0.02)", border: "1px solid var(--border-subtle)",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <MatchBadge quality={m.matchQuality || "related"} />
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
                         {m.event || m.title}
-                      </div>
-                      <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--text-dim)" }}>
-                        {m.yesBid != null && (
-                          <span style={{ fontFamily: "var(--font-mono)" }}>YES: ${Number(m.yesBid).toFixed(2)}</span>
-                        )}
-                        {m.ticker && (
-                          <span style={{ fontFamily: "var(--font-mono)" }}>{m.ticker}</span>
-                        )}
-                        {m.relevance && (
-                          <span style={{ color: "var(--text-muted)", fontStyle: "italic" }}>{m.relevance}</span>
-                        )}
-                      </div>
+                      </span>
                     </div>
-                  ))}
-                </div>
-              )}
-              {similarMarkets.length === 0 && (
-                <div style={{ fontSize: 13, color: "var(--text-dim)" }}>
-                  This market may not have an equivalent on {targetPlatform}.
-                </div>
-              )}
+                    {m.whyShown && (
+                      <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 4, lineHeight: 1.4 }}>
+                        {m.whyShown}
+                      </div>
+                    )}
+                    {m.keyDifference && (
+                      <div style={{
+                        fontSize: 12, color: "var(--warning)", marginBottom: 4,
+                        display: "flex", alignItems: "baseline", gap: 4,
+                      }}>
+                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, flexShrink: 0 }}>DIFF</span>
+                        <span>{m.keyDifference}</span>
+                      </div>
+                    )}
+                    <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--text-dim)" }}>
+                      {m.yesBid != null && (
+                        <span style={{ fontFamily: "var(--font-mono)" }}>YES: ${Number(m.yesBid).toFixed(2)}</span>
+                      )}
+                      {m.ticker && (
+                        <span style={{ fontFamily: "var(--font-mono)" }}>{m.ticker}</span>
+                      )}
+                      {/* Legacy field support */}
+                      {!m.whyShown && m.relevance && (
+                        <span style={{ color: "var(--text-muted)", fontStyle: "italic" }}>{m.relevance}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
