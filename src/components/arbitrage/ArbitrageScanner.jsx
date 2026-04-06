@@ -276,8 +276,11 @@ Respond ONLY in valid JSON:
   }
 
   async function fetchPolymarketAll(slug) {
-    const res = await fetch(`/api/events?slug=${slug}`);
+    // /events/slug/{slug} is the correct path-param endpoint (not query param ?slug=)
+    const res = await fetch(`/api/events/slug/${encodeURIComponent(slug)}`);
+    if (!res.ok) throw new Error(`Polymarket API error: ${res.status}`);
     const data = await res.json();
+    // /events/slug/{slug} returns a single event object, not an array
     const events = Array.isArray(data) ? data : [data];
     if (!events.length || !events[0]?.markets) return null;
     const ev = events[0];

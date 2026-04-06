@@ -395,30 +395,13 @@ export default function CrossPlatformPriceFinder() {
             </div>
           )}
 
-          {/* Arbitrage Alert */}
-          {arbitrage?.detected && (
-            <div style={{
-              margin: "0 16px 16px", padding: "14px 16px", borderRadius: 8,
-              background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.2)",
-            }}>
-              <div style={{
-                fontSize: 13, fontWeight: 700, color: "var(--accent)", marginBottom: 6,
-                fontFamily: "var(--font-display)",
-              }}>
-                Cross-Platform Arbitrage Detected!
-              </div>
-              <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                {arbitrage.strategy}
-              </div>
-              {arbitrage.totalCost != null && arbitrage.profitPercent != null && (
-                <div style={{
-                  marginTop: 8, fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--accent)",
-                }}>
-                  Total cost: ${arbitrage.totalCost.toFixed(2)} → Guaranteed $1.00 payout ={" "}
-                  <strong>{arbitrage.profitPercent.toFixed(1)}% profit</strong>
-                </div>
-              )}
-            </div>
+          {/* Arbitrage Panel — always shown when comparison data exists */}
+          {match?.found && comparison && (
+            <ArbitragePanel
+              comparison={comparison}
+              basePlatform={basePlatform}
+              targetPlatform={targetPlatform}
+            />
           )}
 
           {/* No match — message */}
@@ -498,6 +481,186 @@ export default function CrossPlatformPriceFinder() {
 }
 
 // --- Sub-components ---
+
+/**
+ * Compact collapsible arbitrage panel.
+ * Shows: opportunity → fee breakdown → practical takeaway.
+ *
+ * Fee formulas (verified 2025):
+ *   Kalshi taker: 0.07 × P × (1−P) per contract  [max 1.75¢ at 50¢]
+ *   Polymarket taker: ~0.04 × P × (1−P) per contract  [varies by category]
+ *   Kalshi also pays 3.25% APY on locked collateral (benefit, not cost).
+ */
+function ArbitragePanel({ comparison, basePlatform, targetPlatform }) {
+  const [open, setOpen] = useState(false);
+
+  const sYes = parseFloat(comparison.sourceYes) || 0;
+  const sNo  = parseFloat(comparison.sourceNo)  || 0;
+  const tYes = parseFloat(comparison.targetYesBid) || 0;
+  const tNo  = parseFloat(comparison.targetNoBid)  || 0;
+
+  if (!sYes || !tYes || !sNo || !tNo) return null;
+
+  // Two strategies in ¢ (prices are 0-1, convert to ¢)
+  const sY = sYes * 100, sN = sNo * 100, tY = tYes * 100, tN = tNo * 100;
+  const combo1 = sY + tN; // YES on source, NO on target
+  const combo2 = tY + sN; // YES on target, NO on source
+  const useCombo1 = combo1 <= combo2;
+
+  const best = {
+    total: useCombo1 ? combo1 : combo2,
+    buyYesPlatform: useCombo1 ? basePlatform : targetPlatform,
+    buyYesPrice: useCombo1 ? sY : tY,
+    buyNoPlatform: useCombo1 ? targetPlatform : basePlatform,
+    buyNoPrice: useCombo1 ? tN : sN,
+  };
+
+  const grossProfit = 100 - best.total;
+
+  // Determine which leg is Polymarket vs Kalshi for fee calculation
+  const yesIsPolymarket = best.buyYesPlatform === "Polymarket";
+  const noIsPolymarket  = best.buyNoPlatform  === "Polymarket";
+
+  // Fee formulas: feeRate × P × (1-P), where P is in 0-1 scale
+  const POLY_RATE   = 0.04; // ~4% (politics/finance default)
+  const KALSHI_RATE = 0.07; // 7%
+  const yP = best.buyYesPrice / 100;
+  const nP = best.buyNoPrice  / 100;
+  const polyFee   = (yesIsPolymarket ? POLY_RATE * yP * (1 - yP) : noIsPolymarket ? POLY_RATE * nP * (1 - nP) : 0) * 100;
+  const kalshiFee = (!yesIsPolymarket ? KALSHI_RATE * yP * (1 - yP) : !noIsPolymarket ? KALSHI_RATE * nP * (1 - nP) : 0) * 100;
+  const totalFees = polyFee + kalshiFee;
+  const netProfit = grossProfit - totalFees;
+  const stillProfitable = netProfit > 0;
+
+  // Single-platform takeaway: which is cheaper for just YES
+  const cheaperYesPlatform = sYes <= tYes ? basePlatform : targetPlatform;
+  const cheaperYesPrice    = Math.min(sYes, tYes) * 100;
+  const priceDiff          = Math.abs(sYes - tYes) * 100;
+  const savingsOn1000      = priceDiff > 0 ? Math.round((priceDiff / cheaperYesPrice) * 1000) : 0;
+
+  const buttonBg = grossProfit > 0
+    ? "rgba(0,212,170,0.06)"
+    : "rgba(255,255,255,0.02)";
+  const buttonBorder = grossProfit > 0
+    ? "rgba(0,212,170,0.15)"
+    : "var(--border-subtle)";
+
+  return (
+    <div style={{ margin: "0 0 16px" }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          width: "100%", padding: "12px 16px", borderRadius: open ? "8px 8px 0 0" : 8,
+          background: buttonBg, border: `1px solid ${buttonBorder}`,
+          cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center",
+          color: "var(--text-primary)", fontSize: 13, fontWeight: 600,
+          fontFamily: "var(--font-body)", textAlign: "left",
+        }}
+      >
+        <span>
+          Price Comparison &amp; Fees
+          {grossProfit > 0 && (
+            <span style={{ marginLeft: 8, fontSize: 11, color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
+              {grossProfit.toFixed(1)}¢ raw spread
+            </span>
+          )}
+        </span>
+        <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div style={{
+          padding: "16px 18px", background: "rgba(255,255,255,0.02)",
+          borderRadius: "0 0 8px 8px", border: `1px solid ${buttonBorder}`, borderTop: "none",
+        }}>
+          {/* Step 1 */}
+          <StepLabel>Step 1 — The Spread</StepLabel>
+          <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.7, marginBottom: 12 }}>
+            Buy <strong>YES</strong> on <strong style={{ color: "var(--accent)" }}>{best.buyYesPlatform}</strong> at{" "}
+            <strong>{best.buyYesPrice.toFixed(1)}¢</strong> + Buy <strong>NO</strong> on{" "}
+            <strong style={{ color: "var(--accent)" }}>{best.buyNoPlatform}</strong> at{" "}
+            <strong>{best.buyNoPrice.toFixed(1)}¢</strong>
+          </div>
+          <div style={{
+            fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--text-secondary)", marginBottom: 16,
+          }}>
+            Total: <strong>{best.total.toFixed(1)}¢</strong> → Payout: <strong>100¢</strong> →{" "}
+            Gross profit:{" "}
+            <span style={{ color: grossProfit > 0 ? "var(--accent)" : "var(--negative)", fontWeight: 600 }}>
+              {grossProfit > 0 ? "+" : ""}{grossProfit.toFixed(1)}¢ ({grossProfit > 0
+                ? ((grossProfit / best.total) * 100).toFixed(1) + "%" : "none"})
+            </span>
+          </div>
+
+          {/* Step 2 */}
+          <StepLabel>Step 2 — Fees</StepLabel>
+          <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 4 }}>
+            <div style={{ marginBottom: 3 }}>
+              Polymarket taker fee (4% × P × (1−P) ≈ {polyFee.toFixed(2)}¢)
+            </div>
+            <div style={{ marginBottom: 3 }}>
+              Kalshi taker fee (7% × P × (1−P) ≈ {kalshiFee.toFixed(2)}¢)
+            </div>
+          </div>
+          <div style={{
+            marginTop: 8, marginBottom: 16, fontSize: 13, fontFamily: "var(--font-mono)",
+            fontWeight: 500, color: "var(--text-primary)",
+          }}>
+            After fees:{" "}
+            <span style={{ color: stillProfitable ? "var(--accent)" : "var(--negative)", fontWeight: 700 }}>
+              {netProfit > 0 ? "+" : ""}{netProfit.toFixed(1)}¢{!stillProfitable && " (negative)"}
+            </span>
+          </div>
+
+          {/* Step 3 */}
+          <StepLabel>Step 3 — Reality Check</StepLabel>
+          <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 16 }}>
+            {stillProfitable
+              ? `Even with ${netProfit.toFixed(1)}¢ net profit, capital is locked until resolution. Bots close these gaps in milliseconds — retail arb rarely works in practice.`
+              : `Fees eliminate the profit (${netProfit.toFixed(1)}¢). This is very common: prediction market spreads are thin and fees eat the margin.`}
+            {" "}Kalshi also pays <strong style={{ color: "var(--human-blue)" }}>3.25% APY</strong> on locked collateral, which slightly improves the math for long-duration holds.
+          </div>
+
+          {/* Practical takeaway */}
+          <div style={{
+            padding: "12px 14px", borderRadius: 6, background: "rgba(0,0,0,0.2)",
+            border: "1px solid var(--border-subtle)",
+          }}>
+            <div style={{
+              fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 700,
+              color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.07em",
+              marginBottom: 6,
+            }}>
+              Practical Takeaway
+            </div>
+            <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.6 }}>
+              {priceDiff > 0.5
+                ? <>
+                    Buy YES on <strong style={{ color: "var(--accent)" }}>{cheaperYesPlatform}</strong> at{" "}
+                    <strong>{cheaperYesPrice.toFixed(1)}¢</strong>.{" "}
+                    You save <strong>{priceDiff.toFixed(1)}¢/share</strong> — on a $1,000 bet that's{" "}
+                    <strong>${savingsOn1000} extra profit</strong>.
+                  </>
+                : "Prices are essentially identical across platforms. Trade wherever is most convenient."}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StepLabel({ children }) {
+  return (
+    <div style={{
+      fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 700,
+      color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.07em",
+      marginBottom: 6,
+    }}>
+      {children}
+    </div>
+  );
+}
 
 function MatchBadge({ quality }) {
   const config = {
