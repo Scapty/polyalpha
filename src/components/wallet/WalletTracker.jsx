@@ -57,12 +57,26 @@ export default function WalletTracker({ walletAddress, walletLabel, botScore }) 
 
     setSubmitting(true);
     try {
+      // Fetch current trade count so we only alert on NEW trades after this moment
+      let currentTradeCount = 0;
+      try {
+        const res = await fetch(`/api/data-trades?user=${walletAddress.toLowerCase()}&limit=1`);
+        if (res.ok) {
+          // The API doesn't return a total count, so fetch a large batch to get the count
+          const countRes = await fetch(`/api/data-trades?user=${walletAddress.toLowerCase()}&limit=500`);
+          if (countRes.ok) {
+            const trades = await countRes.json();
+            currentTradeCount = Array.isArray(trades) ? trades.length : 0;
+          }
+        }
+      } catch {}
+
       const { error } = await supabase.from("tracked_wallets").insert({
         email: email.trim().toLowerCase(),
         wallet_address: walletAddress.toLowerCase(),
         wallet_label: walletLabel || null,
         bot_score: botScore || null,
-        last_known_trade_count: 0,
+        last_known_trade_count: currentTradeCount,
       });
 
       if (error) {

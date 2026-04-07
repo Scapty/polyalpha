@@ -2,7 +2,15 @@ import { useState, useEffect } from "react";
 import { findBestPrice, getSearchesRemaining } from "../../utils/crossPlatformFinder";
 import { hasApiKey } from "../../utils/aiAgent";
 
-const PLATFORMS = ["Polymarket", "Kalshi", "Other"];
+const PLATFORMS = ["Polymarket", "Kalshi"];
+
+const STEPS = [
+  { id: 1, label: "Extract identity" },
+  { id: 2, label: "Generate search terms" },
+  { id: 3, label: "Search target platform" },
+  { id: 4, label: "AI matching" },
+  { id: 5, label: "Arbitrage analysis" },
+];
 
 export default function CrossPlatformPriceFinder() {
   const [basePlatform, setBasePlatform] = useState("Polymarket");
@@ -10,6 +18,8 @@ export default function CrossPlatformPriceFinder() {
   const [yesPrice, setYesPrice] = useState("");
   const [noPrice, setNoPrice] = useState("");
   const [loading, setLoading] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [stepMessage, setStepMessage] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [remaining, setRemaining] = useState(getSearchesRemaining());
@@ -19,7 +29,6 @@ export default function CrossPlatformPriceFinder() {
     return () => clearInterval(id);
   }, []);
 
-  // Auto-calculate NO price when YES price changes
   function handleYesChange(val) {
     setYesPrice(val);
     const num = parseFloat(val);
@@ -37,6 +46,8 @@ export default function CrossPlatformPriceFinder() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setCurrentStep(0);
+    setStepMessage("");
 
     try {
       const data = await findBestPrice({
@@ -44,6 +55,10 @@ export default function CrossPlatformPriceFinder() {
         yesPrice: yp.toFixed(2),
         noPrice: np.toFixed(2),
         basePlatform,
+        onProgress: (step, message) => {
+          setCurrentStep(step);
+          setStepMessage(message);
+        },
       });
       setResult(data);
       setRemaining(getSearchesRemaining());
@@ -52,15 +67,12 @@ export default function CrossPlatformPriceFinder() {
         setError("Set your Anthropic API key (header button) to use this feature.");
       } else if (err.message === "RATE_LIMITED") {
         setError("Rate limit reached. Try again in a few minutes.");
-      } else if (err.message === "KALSHI_UNAVAILABLE") {
-        setError("Could not reach Kalshi API. Try again shortly.");
-      } else if (err.message === "POLYMARKET_UNAVAILABLE") {
-        setError("Could not reach Polymarket API. Try again shortly.");
       } else {
         setError(err.message || "Search failed. Please try again.");
       }
     } finally {
       setLoading(false);
+      setCurrentStep(0);
     }
   }
 
@@ -192,13 +204,37 @@ export default function CrossPlatformPriceFinder() {
           >
             {loading ? "Searching..." : "Find Best Price"}
           </button>
-          {loading && (
-            <span style={{ fontSize: 12, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
-              Fetching {basePlatform === "Polymarket" ? "Kalshi" : "Polymarket"} markets & matching with AI...
-            </span>
-          )}
         </div>
       </div>
+
+      {/* Step Progress Indicator */}
+      {loading && (
+        <div style={{
+          padding: "14px 16px", borderRadius: 8, marginBottom: 16,
+          background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.1)",
+        }}>
+          <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+            {STEPS.map((step) => (
+              <div key={step.id} style={{
+                flex: 1, height: 3, borderRadius: 2,
+                background: currentStep >= step.id
+                  ? "var(--accent)"
+                  : "rgba(255,255,255,0.06)",
+                transition: "background 0.3s ease",
+              }} />
+            ))}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{
+              width: 6, height: 6, borderRadius: "50%", background: "var(--accent)",
+              animation: "pulse 1.5s ease-in-out infinite",
+            }} />
+            <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+              Step {currentStep}/5: {stepMessage}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Error */}
       {error && (
@@ -224,7 +260,7 @@ export default function CrossPlatformPriceFinder() {
               Results for: <strong style={{ color: "var(--text-primary)" }}>"{truncate(marketTitle, 60)}"</strong>
             </span>
             <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
-              {result.marketsScanned || result.kalshiMarketsScanned || result.polymarketMarketsScanned} {targetPlatform} markets scanned
+              {result.marketsScanned} candidates checked
               {result.searchedAt && ` · ${new Date(result.searchedAt).toLocaleTimeString()}`}
             </span>
           </div>
@@ -238,24 +274,21 @@ export default function CrossPlatformPriceFinder() {
                 <span style={{ fontSize: 13, color: "var(--text-muted)" }}>{match.explanation}</span>
               </div>
 
-              {/* Key differences callout for non-exact matches */}
-              {match.matchQuality !== "exact" && match.keyDifferences && (
+              {/* Warning for similar matches */}
+              {match.matchQuality === "similar" && (
                 <div style={{
                   padding: "10px 14px", borderRadius: 8, marginBottom: 14,
-                  background: match.matchQuality === "similar"
-                    ? "rgba(59,130,246,0.06)" : "rgba(255,170,0,0.06)",
-                  border: `1px solid ${match.matchQuality === "similar"
-                    ? "rgba(59,130,246,0.15)" : "rgba(255,170,0,0.15)"}`,
+                  background: "rgba(255,170,0,0.06)", border: "1px solid rgba(255,170,0,0.15)",
                 }}>
                   <div style={{
                     fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
-                    fontFamily: "var(--font-mono)", marginBottom: 4,
-                    color: match.matchQuality === "similar" ? "var(--human-blue)" : "var(--warning)",
+                    fontFamily: "var(--font-mono)", marginBottom: 4, color: "var(--warning)",
                   }}>
-                    Key differences
+                    Verify before trading
                   </div>
                   <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                    {match.keyDifferences}
+                    These markets are similar but may have different resolution criteria.
+                    {match.keyDifferences && ` ${match.keyDifferences}`}
                   </div>
                   {match.recommendation && (
                     <div style={{
@@ -268,12 +301,12 @@ export default function CrossPlatformPriceFinder() {
                 </div>
               )}
 
-              {/* Comparison table */}
+              {/* Side-by-side comparison table */}
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-                      {["Platform", "YES Price", "NO Price", "Volume 24h", "Status"].map((h) => (
+                      {["Platform", "YES Price", "NO Price", "Best Price"].map((h) => (
                         <th key={h} style={{
                           padding: "8px 12px", textAlign: "left", color: "var(--text-muted)",
                           fontWeight: 500, fontFamily: "var(--font-body)", fontSize: 11,
@@ -285,27 +318,36 @@ export default function CrossPlatformPriceFinder() {
                     </tr>
                   </thead>
                   <tbody>
-                    {/* User's platform row */}
+                    {/* Source platform row */}
                     <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                      <td style={{ padding: "10px 12px", fontWeight: 600 }}>{basePlatform}</td>
+                      <td style={{ padding: "10px 12px", fontWeight: 600 }}>
+                        {basePlatform}
+                        <span style={{
+                          marginLeft: 6, fontSize: 9, fontFamily: "var(--font-mono)",
+                          padding: "1px 5px", borderRadius: 3, background: "rgba(255,255,255,0.06)",
+                          color: "var(--text-dim)", verticalAlign: "middle",
+                        }}>YOUR BET</span>
+                      </td>
                       <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                        ${yesPrice}
+                        ${parseFloat(yesPrice).toFixed(2)}
                         {comparison.bestYesPlatform === basePlatform && <BestTag />}
                       </td>
                       <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                        ${noPrice}
+                        ${parseFloat(noPrice).toFixed(2)}
                         {comparison.bestNoPlatform === basePlatform && <BestTag />}
                       </td>
-                      <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-muted)" }}>
-                        —
-                      </td>
                       <td style={{ padding: "10px 12px" }}>
-                        <span style={{
-                          fontSize: 10, fontFamily: "var(--font-mono)", padding: "2px 6px",
-                          borderRadius: 4, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)",
-                        }}>
-                          Your market
-                        </span>
+                        {comparison.bestYesPlatform === basePlatform ? (
+                          <span style={{ fontSize: 11, color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
+                            Cheaper YES
+                          </span>
+                        ) : comparison.bestNoPlatform === basePlatform ? (
+                          <span style={{ fontSize: 11, color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
+                            Cheaper NO
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 11, color: "var(--text-dim)" }}>—</span>
+                        )}
                       </td>
                     </tr>
                     {/* Target platform row */}
@@ -314,43 +356,36 @@ export default function CrossPlatformPriceFinder() {
                       <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: 12 }}>
                         {comparison.targetYesBid != null
                           ? `$${Number(comparison.targetYesBid).toFixed(2)}`
-                          : comparison.kalshiYesBid != null
-                            ? `$${Number(comparison.kalshiYesBid).toFixed(2)}`
-                            : comparison.polymarketYes != null
-                              ? `$${Number(comparison.polymarketYes).toFixed(2)}`
-                              : "—"}
+                          : "—"}
+                        {comparison.targetYesAsk && comparison.targetYesAsk !== comparison.targetYesBid && (
+                          <span style={{ color: "var(--text-dim)", fontSize: 10, marginLeft: 4 }}>
+                            (ask: ${Number(comparison.targetYesAsk).toFixed(2)})
+                          </span>
+                        )}
                         {comparison.bestYesPlatform === targetPlatform && <BestTag />}
                       </td>
                       <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: 12 }}>
                         {comparison.targetNoBid != null
                           ? `$${Number(comparison.targetNoBid).toFixed(2)}`
-                          : comparison.kalshiNoBid != null
-                            ? `$${Number(comparison.kalshiNoBid).toFixed(2)}`
-                            : comparison.polymarketNo != null
-                              ? `$${Number(comparison.polymarketNo).toFixed(2)}`
-                              : "—"}
+                          : "—"}
+                        {comparison.targetNoAsk && comparison.targetNoAsk !== comparison.targetNoBid && (
+                          <span style={{ color: "var(--text-dim)", fontSize: 10, marginLeft: 4 }}>
+                            (ask: ${Number(comparison.targetNoAsk).toFixed(2)})
+                          </span>
+                        )}
                         {comparison.bestNoPlatform === targetPlatform && <BestTag />}
                       </td>
-                      <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-muted)" }}>
-                        {(comparison.targetVolume24h || comparison.kalshiVolume24h || comparison.polymarketVolume24h)
-                          ? formatVol(comparison.targetVolume24h || comparison.kalshiVolume24h || comparison.polymarketVolume24h)
-                          : "—"}
-                      </td>
                       <td style={{ padding: "10px 12px" }}>
-                        {comparison.savingsPerShare > 0 ? (
-                          <span style={{
-                            fontSize: 10, fontFamily: "var(--font-mono)", padding: "2px 6px",
-                            borderRadius: 4, background: "rgba(0,212,170,0.1)", color: "var(--accent)",
-                          }}>
-                            Better!
+                        {comparison.bestYesPlatform === targetPlatform ? (
+                          <span style={{ fontSize: 11, color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
+                            Cheaper YES
+                          </span>
+                        ) : comparison.bestNoPlatform === targetPlatform ? (
+                          <span style={{ fontSize: 11, color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
+                            Cheaper NO
                           </span>
                         ) : (
-                          <span style={{
-                            fontSize: 10, fontFamily: "var(--font-mono)", padding: "2px 6px",
-                            borderRadius: 4, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)",
-                          }}>
-                            Similar
-                          </span>
+                          <span style={{ fontSize: 11, color: "var(--text-dim)" }}>—</span>
                         )}
                       </td>
                     </tr>
@@ -358,36 +393,18 @@ export default function CrossPlatformPriceFinder() {
                 </table>
               </div>
 
-              {/* Best price summary */}
-              <div style={{
-                marginTop: 16, display: "flex", flexDirection: "column", gap: 6,
-                fontSize: 13, color: "var(--text-secondary)",
-              }}>
-                <div>
-                  Best YES price: <strong style={{ color: "var(--accent)" }}>{comparison.bestYesPlatform}</strong>
-                  {comparison.savingsPerShare > 0 && (
-                    <span style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
-                      {" "}(save ${comparison.savingsPerShare.toFixed(2)}/share)
-                    </span>
-                  )}
-                </div>
-                <div>
-                  Best NO price: <strong style={{ color: "var(--accent)" }}>{comparison.bestNoPlatform}</strong>
-                </div>
-              </div>
-
-              {/* Target market title */}
-              {(match.targetTitle || match.kalshiTitle || match.polymarketTitle) && (
+              {/* Target market info */}
+              {(match.targetTitle || match.targetEvent) && (
                 <div style={{
                   marginTop: 12, padding: "8px 12px", borderRadius: 6,
                   background: "rgba(255,255,255,0.02)", fontSize: 12, color: "var(--text-dim)",
                 }}>
                   {targetPlatform} market: <span style={{ color: "var(--text-muted)" }}>
-                    {match.targetEvent || match.kalshiEvent || match.targetTitle || match.kalshiTitle || match.polymarketTitle}
+                    {match.targetEvent || match.targetTitle}
                   </span>
-                  {(match.targetTicker || match.kalshiTicker || match.polymarketId) && (
+                  {match.targetTicker && (
                     <span style={{ marginLeft: 8, fontFamily: "var(--font-mono)", color: "var(--text-dim)" }}>
-                      ({match.targetTicker || match.kalshiTicker || match.polymarketId})
+                      ({match.targetTicker})
                     </span>
                   )}
                 </div>
@@ -395,23 +412,34 @@ export default function CrossPlatformPriceFinder() {
             </div>
           )}
 
-          {/* Arbitrage Panel — always shown when comparison data exists */}
-          {match?.found && comparison && (
+          {/* Arbitrage Panel */}
+          {match?.found && comparison && arbitrage && (
             <ArbitragePanel
-              comparison={comparison}
+              arbitrage={arbitrage}
               basePlatform={basePlatform}
               targetPlatform={targetPlatform}
             />
           )}
 
-          {/* No match — message */}
+          {/* No match */}
           {match && !match.found && similarMarkets.length === 0 && (
-            <div style={{ padding: 16, fontSize: 13, color: "var(--text-dim)" }}>
-              This market may not have an equivalent on {targetPlatform}.
+            <div style={{
+              padding: 16, fontSize: 13, color: "var(--text-dim)",
+              display: "flex", flexDirection: "column", gap: 8,
+            }}>
+              <div>No matching market found on {targetPlatform}. This bet may be unique to {basePlatform}.</div>
+              {result.searchTerms && (
+                <div style={{
+                  fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-dim)",
+                  padding: "8px 12px", borderRadius: 6, background: "rgba(255,255,255,0.02)",
+                }}>
+                  Searched for: {result.searchTerms.primary_keywords?.join(", ")}
+                </div>
+              )}
             </div>
           )}
 
-          {/* Similar/alternative markets — always shown when available */}
+          {/* Similar markets */}
           {similarMarkets.length > 0 && (
             <div style={{ padding: 16, borderTop: match?.found ? "1px solid var(--border-subtle)" : "none" }}>
               <div style={{
@@ -429,7 +457,7 @@ export default function CrossPlatformPriceFinder() {
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                       <MatchBadge quality={m.matchQuality || "related"} />
                       <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
-                        {m.event || m.title}
+                        {m.title}
                       </span>
                     </div>
                     {m.whyShown && (
@@ -446,18 +474,11 @@ export default function CrossPlatformPriceFinder() {
                         <span>{m.keyDifference}</span>
                       </div>
                     )}
-                    <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--text-dim)" }}>
-                      {m.yesBid != null && (
-                        <span style={{ fontFamily: "var(--font-mono)" }}>YES: ${Number(m.yesBid).toFixed(2)}</span>
-                      )}
-                      {m.ticker && (
-                        <span style={{ fontFamily: "var(--font-mono)" }}>{m.ticker}</span>
-                      )}
-                      {/* Legacy field support */}
-                      {!m.whyShown && m.relevance && (
-                        <span style={{ color: "var(--text-muted)", fontStyle: "italic" }}>{m.relevance}</span>
-                      )}
-                    </div>
+                    {m.ticker && (
+                      <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+                        {m.ticker}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -480,73 +501,37 @@ export default function CrossPlatformPriceFinder() {
   );
 }
 
-// --- Sub-components ---
+// --- Arbitrage Panel ---
 
-/**
- * Compact collapsible arbitrage panel.
- * Shows: opportunity → fee breakdown → practical takeaway.
- *
- * Fee formulas (verified 2025):
- *   Kalshi taker: 0.07 × P × (1−P) per contract  [max 1.75¢ at 50¢]
- *   Polymarket taker: ~0.04 × P × (1−P) per contract  [varies by category]
- *   Kalshi also pays 3.25% APY on locked collateral (benefit, not cost).
- */
-function ArbitragePanel({ comparison, basePlatform, targetPlatform }) {
-  const [open, setOpen] = useState(false);
+function ArbitragePanel({ arbitrage, basePlatform, targetPlatform }) {
+  const [open, setOpen] = useState(true);
 
-  const sYes = parseFloat(comparison.sourceYes) || 0;
-  const sNo  = parseFloat(comparison.sourceNo)  || 0;
-  const tYes = parseFloat(comparison.targetYesBid) || 0;
-  const tNo  = parseFloat(comparison.targetNoBid)  || 0;
+  const grossCents = (arbitrage.grossProfit * 100).toFixed(1);
+  const netCents = (arbitrage.netProfit * 100).toFixed(1);
+  const feesCents = (arbitrage.totalFees * 100).toFixed(2);
+  const totalCostCents = (arbitrage.bestComboTotal * 100).toFixed(1);
+  const yesP = arbitrage.buyYesPrice * 100;
+  const noP = arbitrage.buyNoPrice * 100;
 
-  if (!sYes || !tYes || !sNo || !tNo) return null;
+  const isProfit = arbitrage.detected;
+  const grossPositive = arbitrage.grossProfit > 0;
 
-  // Two strategies in ¢ (prices are 0-1, convert to ¢)
-  const sY = sYes * 100, sN = sNo * 100, tY = tYes * 100, tN = tNo * 100;
-  const combo1 = sY + tN; // YES on source, NO on target
-  const combo2 = tY + sN; // YES on target, NO on source
-  const useCombo1 = combo1 <= combo2;
+  // Single-side savings
+  const priceDiffCents = Math.abs(yesP - noP) > 0.5 ? Math.abs(yesP - noP) : 0;
 
-  const best = {
-    total: useCombo1 ? combo1 : combo2,
-    buyYesPlatform: useCombo1 ? basePlatform : targetPlatform,
-    buyYesPrice: useCombo1 ? sY : tY,
-    buyNoPlatform: useCombo1 ? targetPlatform : basePlatform,
-    buyNoPrice: useCombo1 ? tN : sN,
-  };
-
-  const grossProfit = 100 - best.total;
-
-  // Determine which leg is Polymarket vs Kalshi for fee calculation
-  const yesIsPolymarket = best.buyYesPlatform === "Polymarket";
-  const noIsPolymarket  = best.buyNoPlatform  === "Polymarket";
-
-  // Fee formulas: feeRate × P × (1-P), where P is in 0-1 scale
-  const POLY_RATE   = 0.04; // ~4% (politics/finance default)
-  const KALSHI_RATE = 0.07; // 7%
-  const yP = best.buyYesPrice / 100;
-  const nP = best.buyNoPrice  / 100;
-  const polyFee   = (yesIsPolymarket ? POLY_RATE * yP * (1 - yP) : noIsPolymarket ? POLY_RATE * nP * (1 - nP) : 0) * 100;
-  const kalshiFee = (!yesIsPolymarket ? KALSHI_RATE * yP * (1 - yP) : !noIsPolymarket ? KALSHI_RATE * nP * (1 - nP) : 0) * 100;
-  const totalFees = polyFee + kalshiFee;
-  const netProfit = grossProfit - totalFees;
-  const stillProfitable = netProfit > 0;
-
-  // Single-platform takeaway: which is cheaper for just YES
-  const cheaperYesPlatform = sYes <= tYes ? basePlatform : targetPlatform;
-  const cheaperYesPrice    = Math.min(sYes, tYes) * 100;
-  const priceDiff          = Math.abs(sYes - tYes) * 100;
-  const savingsOn1000      = priceDiff > 0 ? Math.round((priceDiff / cheaperYesPrice) * 1000) : 0;
-
-  const buttonBg = grossProfit > 0
+  const buttonBg = isProfit
     ? "rgba(0,212,170,0.06)"
-    : "rgba(255,255,255,0.02)";
-  const buttonBorder = grossProfit > 0
+    : grossPositive
+      ? "rgba(255,170,0,0.04)"
+      : "rgba(255,255,255,0.02)";
+  const buttonBorder = isProfit
     ? "rgba(0,212,170,0.15)"
-    : "var(--border-subtle)";
+    : grossPositive
+      ? "rgba(255,170,0,0.1)"
+      : "var(--border-subtle)";
 
   return (
-    <div style={{ margin: "0 0 16px" }}>
+    <div style={{ margin: "0 16px 16px" }}>
       <button
         onClick={() => setOpen((o) => !o)}
         style={{
@@ -558,10 +543,15 @@ function ArbitragePanel({ comparison, basePlatform, targetPlatform }) {
         }}
       >
         <span>
-          Price Comparison &amp; Fees
-          {grossProfit > 0 && (
+          Arbitrage Analysis
+          {isProfit && (
             <span style={{ marginLeft: 8, fontSize: 11, color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
-              {grossProfit.toFixed(1)}¢ raw spread
+              +{netCents}¢ net profit per share
+            </span>
+          )}
+          {!isProfit && grossPositive && (
+            <span style={{ marginLeft: 8, fontSize: 11, color: "var(--warning)", fontFamily: "var(--font-mono)" }}>
+              {grossCents}¢ spread (fees eat profit)
             </span>
           )}
         </span>
@@ -573,55 +563,55 @@ function ArbitragePanel({ comparison, basePlatform, targetPlatform }) {
           padding: "16px 18px", background: "rgba(255,255,255,0.02)",
           borderRadius: "0 0 8px 8px", border: `1px solid ${buttonBorder}`, borderTop: "none",
         }}>
-          {/* Step 1 */}
+          {/* Step 1: The Spread */}
           <StepLabel>Step 1 — The Spread</StepLabel>
           <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.7, marginBottom: 12 }}>
-            Buy <strong>YES</strong> on <strong style={{ color: "var(--accent)" }}>{best.buyYesPlatform}</strong> at{" "}
-            <strong>{best.buyYesPrice.toFixed(1)}¢</strong> + Buy <strong>NO</strong> on{" "}
-            <strong style={{ color: "var(--accent)" }}>{best.buyNoPlatform}</strong> at{" "}
-            <strong>{best.buyNoPrice.toFixed(1)}¢</strong>
+            Buy <strong>YES</strong> on <strong style={{ color: "var(--accent)" }}>{arbitrage.buyYesPlatform}</strong> at{" "}
+            <strong>{yesP.toFixed(1)}¢</strong> + Buy <strong>NO</strong> on{" "}
+            <strong style={{ color: "var(--accent)" }}>{arbitrage.buyNoPlatform}</strong> at{" "}
+            <strong>{noP.toFixed(1)}¢</strong>
           </div>
           <div style={{
             fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--text-secondary)", marginBottom: 16,
           }}>
-            Total: <strong>{best.total.toFixed(1)}¢</strong> → Payout: <strong>100¢</strong> →{" "}
+            Total cost: <strong>{totalCostCents}¢</strong> → Payout: <strong>100¢</strong> →{" "}
             Gross profit:{" "}
-            <span style={{ color: grossProfit > 0 ? "var(--accent)" : "var(--negative)", fontWeight: 600 }}>
-              {grossProfit > 0 ? "+" : ""}{grossProfit.toFixed(1)}¢ ({grossProfit > 0
-                ? ((grossProfit / best.total) * 100).toFixed(1) + "%" : "none"})
+            <span style={{ color: grossPositive ? "var(--accent)" : "var(--negative)", fontWeight: 600 }}>
+              {grossPositive ? "+" : ""}{grossCents}¢
+              {grossPositive && ` (${((arbitrage.grossProfit / arbitrage.bestComboTotal) * 100).toFixed(1)}%)`}
             </span>
           </div>
 
-          {/* Step 2 */}
+          {/* Step 2: Fees */}
           <StepLabel>Step 2 — Fees</StepLabel>
           <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 4 }}>
             <div style={{ marginBottom: 3 }}>
-              Polymarket taker fee (4% × P × (1−P) ≈ {polyFee.toFixed(2)}¢)
+              Polymarket taker fee (~4%): ~{(arbitrage.totalFees * 50).toFixed(2)}¢ est.
             </div>
             <div style={{ marginBottom: 3 }}>
-              Kalshi taker fee (7% × P × (1−P) ≈ {kalshiFee.toFixed(2)}¢)
+              Kalshi taker fee (~7%): ~{(arbitrage.totalFees * 50).toFixed(2)}¢ est.
             </div>
           </div>
           <div style={{
             marginTop: 8, marginBottom: 16, fontSize: 13, fontFamily: "var(--font-mono)",
             fontWeight: 500, color: "var(--text-primary)",
           }}>
-            After fees:{" "}
-            <span style={{ color: stillProfitable ? "var(--accent)" : "var(--negative)", fontWeight: 700 }}>
-              {netProfit > 0 ? "+" : ""}{netProfit.toFixed(1)}¢{!stillProfitable && " (negative)"}
+            Total fees: ~{feesCents}¢ → After fees:{" "}
+            <span style={{ color: isProfit ? "var(--accent)" : "var(--negative)", fontWeight: 700 }}>
+              {arbitrage.netProfit > 0 ? "+" : ""}{netCents}¢{!isProfit && " (negative)"}
             </span>
           </div>
 
-          {/* Step 3 */}
+          {/* Step 3: Reality Check */}
           <StepLabel>Step 3 — Reality Check</StepLabel>
           <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 16 }}>
-            {stillProfitable
-              ? `Even with ${netProfit.toFixed(1)}¢ net profit, capital is locked until resolution. Bots close these gaps in milliseconds — retail arb rarely works in practice.`
-              : `Fees eliminate the profit (${netProfit.toFixed(1)}¢). This is very common: prediction market spreads are thin and fees eat the margin.`}
-            {" "}Kalshi also pays <strong style={{ color: "var(--human-blue)" }}>3.25% APY</strong> on locked collateral, which slightly improves the math for long-duration holds.
+            {isProfit
+              ? `With ${netCents}¢ net profit per share, a $1,000 position yields ~$${arbitrage.profitOn1000} guaranteed. However, capital is locked until resolution and bots close these gaps in milliseconds.`
+              : `Fees eliminate the profit (${netCents}¢ net). This is common — prediction market spreads are thin and fees eat the margin.`}
+            {" "}Kalshi also pays <strong style={{ color: "var(--human-blue)" }}>3.25% APY</strong> on locked collateral.
           </div>
 
-          {/* Practical takeaway */}
+          {/* Practical Takeaway */}
           <div style={{
             padding: "12px 14px", borderRadius: 6, background: "rgba(0,0,0,0.2)",
             border: "1px solid var(--border-subtle)",
@@ -634,14 +624,22 @@ function ArbitragePanel({ comparison, basePlatform, targetPlatform }) {
               Practical Takeaway
             </div>
             <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.6 }}>
-              {priceDiff > 0.5
-                ? <>
-                    Buy YES on <strong style={{ color: "var(--accent)" }}>{cheaperYesPlatform}</strong> at{" "}
-                    <strong>{cheaperYesPrice.toFixed(1)}¢</strong>.{" "}
-                    You save <strong>{priceDiff.toFixed(1)}¢/share</strong> — on a $1,000 bet that's{" "}
-                    <strong>${savingsOn1000} extra profit</strong>.
-                  </>
-                : "Prices are essentially identical across platforms. Trade wherever is most convenient."}
+              {isProfit ? (
+                <>
+                  Arbitrage opportunity detected: buy YES on{" "}
+                  <strong style={{ color: "var(--accent)" }}>{arbitrage.buyYesPlatform}</strong> +
+                  NO on <strong style={{ color: "var(--accent)" }}>{arbitrage.buyNoPlatform}</strong>.
+                  Net profit: <strong>{netCents}¢/share</strong> (~${arbitrage.profitOn1000} on $1,000).
+                  Act fast — these spreads close quickly.
+                </>
+              ) : priceDiffCents > 0.5 ? (
+                <>
+                  No arbitrage, but prices differ. Buy YES on the cheaper platform to save{" "}
+                  <strong>{priceDiffCents.toFixed(1)}¢/share</strong>.
+                </>
+              ) : (
+                "Prices are essentially identical across platforms. Trade wherever is most convenient."
+              )}
             </div>
           </div>
         </div>
@@ -649,6 +647,8 @@ function ArbitragePanel({ comparison, basePlatform, targetPlatform }) {
     </div>
   );
 }
+
+// --- Sub-components ---
 
 function StepLabel({ children }) {
   return (
@@ -693,17 +693,7 @@ function BestTag() {
   );
 }
 
-// --- Helpers ---
-
 function truncate(str, len) {
   if (!str) return "";
   return str.length > len ? str.slice(0, len) + "..." : str;
-}
-
-function formatVol(v) {
-  if (!v) return "$0";
-  const num = Number(v);
-  if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(1)}M`;
-  if (num >= 1_000) return `$${(num / 1_000).toFixed(0)}K`;
-  return `$${num.toFixed(0)}`;
 }

@@ -123,13 +123,30 @@ export default function ArbitrageScanner() {
           ? new Date(sourceData.endDate).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
           : null;
 
+        // Build a human-readable description for Claude's search
+        const titleIsReadable = sourceData.eventTitle && !/^[A-Z0-9-]+$/.test(sourceData.eventTitle);
+        const outcomeNames = sourceData.outcomes.slice(0, 10).map(o => o.title).join(", ");
+        const resolutionHint = sourceData.resolutionDetails
+          ? sourceData.resolutionDetails.slice(0, 300)
+          : "";
+
+        // Construct search query — use the readable title, or outcomes + resolution if title is a ticker
+        const searchQuery = titleIsReadable
+          ? sourceData.eventTitle
+          : outcomeNames.length > 3
+            ? outcomeNames
+            : resolutionHint.split(/[.!?]/)[0] || sourceData.eventTitle;
+
         aiResult = await claudeCall(apiKey, `Find the equivalent prediction market on ${otherPlatform}.
 
 Source: ${platform === "polymarket" ? "Polymarket" : "Kalshi"}
 Title: "${sourceData.eventTitle}"
-Outcomes: ${sourceData.outcomes.slice(0, 10).map(o => o.title).join(", ")}
+${!titleIsReadable ? `NOTE: The title above is a platform ticker/ID, NOT a human-readable name. Use the outcomes and resolution details below to understand what this market is about.` : ""}
+Outcomes: ${outcomeNames}
+${srcEndDate ? `End date: ${srcEndDate}` : ""}
+${resolutionHint ? `Resolution rules: ${resolutionHint}` : ""}
 
-Search: site:${otherPlatform === "Kalshi" ? "kalshi.com" : "polymarket.com"} ${sourceData.eventTitle}
+Search: site:${otherPlatform === "Kalshi" ? "kalshi.com" : "polymarket.com"} ${searchQuery}
 
 IMPORTANT: Extract the ticker/slug from the URL you find.
 ${otherPlatform === "Kalshi"
@@ -167,8 +184,13 @@ Respond ONLY in valid JSON:
               if (m) slug = m[1];
             }
           }
-          if (otherPlatform === "Kalshi" && ticker) otherData = await fetchKalshiAll(ticker);
-          else if (otherPlatform === "Polymarket" && slug) otherData = await fetchPolymarketAll(slug);
+          try {
+            if (otherPlatform === "Kalshi" && ticker) otherData = await fetchKalshiAll(ticker);
+            else if (otherPlatform === "Polymarket" && slug) otherData = await fetchPolymarketAll(slug);
+          } catch (fetchErr) {
+            console.warn(`Could not fetch ${otherPlatform} data for ${ticker || slug}:`, fetchErr.message);
+            otherData = null;
+          }
         }
       }
 
@@ -196,7 +218,7 @@ Respond ONLY in valid JSON:
         explanation: aiResult.explanation,
         analysis,
         polymarket: { title: polyData?.eventTitle || "", url: platform === "polymarket" ? url : aiResult.url, volume24h: polyData?.volume24h, volumeTotal: polyData?.volumeTotal },
-        kalshi: { title: kalshiData?.eventTitle || "", url: platform === "kalshi" ? url : aiResult.url, volume24h: kalshiData?.volume24h, volumeTotal: kalshiData?.volumeTotal },
+        kalshi: { title: kalshiData?.eventTitle || "", url: platform === "kalshi" ? url : aiResult.url, volume24h: kalshiData?.volume24h, volumeTotal: kalshiData?.volumeTotal, endDate: kalshiData?.endDate },
         matchedOutcomes: matched,
       });
 
@@ -296,15 +318,19 @@ Respond ONLY in valid JSON:
       resolutionDetails: description,
       endDate,
       outcomes: markets.filter(m => m.outcomePrices && m.outcomePrices !== "[]").map((m) => {
-        let y = 0;
-        try { const p = JSON.parse(m.outcomePrices || "[]"); y = parseFloat(p[0]) || 0; } catch {}
+        let y = 0, n = 0;
+        try {
+          const p = JSON.parse(m.outcomePrices || "[]");
+          y = parseFloat(p[0]) || 0;
+          n = p.length >= 2 ? (parseFloat(p[1]) || 0) : (1 - y);
+        } catch {}
         const mEndDate = m.endDate || ev.endDate || "";
         const isClosed = m.closed === true || m.active === false;
         const isExpired = mEndDate ? new Date(mEndDate) < new Date() : false;
         return {
           title: m.groupItemTitle || m.question || "",
           yes: (y * 100).toFixed(1),
-          no: ((1 - y) * 100).toFixed(1),
+          no: (n * 100).toFixed(1),
           endDate: mEndDate,
           expired: isExpired || isClosed,
         };
@@ -336,8 +362,12 @@ Respond ONLY in valid JSON:
     }
     if (!markets.length) return null;
 
-    // Get event title by scanning the series and matching the event_ticker
-    let eventTitle = seriesOrEventTicker;
+    // Get event title — try multiple strategies since tickers don't describe the trade
+    // IMPORTANT: prioritize the Events API (gives the broad event title like "Who will win...")
+    // over market titles (which are outcome-specific like "Will Gabriel Attal win...")
+    let eventTitle = seriesOrEventTicker; // worst-case fallback: the raw ticker
+
+    // Strategy 1: Look up event by series ticker (best source — gives the broad event title)
     try {
       const evRes = await fetch(`/api/kalshi/events?series_ticker=${seriesTicker}&limit=100`);
       const evData = await evRes.json();
@@ -345,6 +375,37 @@ Respond ONLY in valid JSON:
       if (match?.title) eventTitle = match.title;
       else if (evData.events?.[0]?.title) eventTitle = evData.events[0].title;
     } catch {}
+
+    // Strategy 2: If still a ticker, try fetching by event_ticker directly
+    if (/^[A-Z0-9-]+$/.test(eventTitle)) {
+      try {
+        const evRes = await fetch(`/api/kalshi/events?event_ticker=${seriesOrEventTicker}&limit=1`);
+        const evData = await evRes.json();
+        if (evData.events?.[0]?.title) eventTitle = evData.events[0].title;
+      } catch {}
+    }
+
+    // Strategy 3: Use the event_title field from markets (NOT the market title — that's outcome-specific)
+    if (/^[A-Z0-9-]+$/.test(eventTitle) && markets.length > 0) {
+      const evTitle = markets[0]?.event_title;
+      if (evTitle && evTitle.length > 5 && !/^[A-Z0-9-]+$/.test(evTitle)) {
+        eventTitle = evTitle;
+      }
+    }
+
+    // Strategy 4 (last resort): Use market title or rules if everything above failed
+    if (/^[A-Z0-9-]+$/.test(eventTitle) && markets.length > 0) {
+      const mTitle = markets[0]?.title || "";
+      if (mTitle && mTitle.length > 5 && !/^[A-Z0-9-]+$/.test(mTitle)) {
+        eventTitle = mTitle;
+      } else {
+        const rules = markets[0]?.rules_primary || "";
+        const firstSentence = rules.split(/[.!?]/)[0]?.trim();
+        if (firstSentence && firstSentence.length > 10 && firstSentence.length < 200) {
+          eventTitle = firstSentence;
+        }
+      }
+    }
     const volume24h = markets.reduce((s, m) => s + (parseFloat(m.volume_24h_fp) || 0), 0);
     const volumeTotal = markets.reduce((s, m) => s + (parseFloat(m.volume_fp) || 0), 0);
     const firstMarket = markets[0] || {};
@@ -361,6 +422,7 @@ Respond ONLY in valid JSON:
           title: m.yes_sub_title || m.title || m.ticker,
           yesAsk: (parseFloat(m.yes_ask_dollars || 0) * 100).toFixed(1),
           yesBid: (parseFloat(m.yes_bid_dollars || 0) * 100).toFixed(1),
+          noAsk: (parseFloat(m.no_ask_dollars || 0) * 100).toFixed(1),
           noBid: (parseFloat(m.no_bid_dollars || 0) * 100).toFixed(1),
           endDate: exp,
           expired: isExpired,
@@ -608,7 +670,7 @@ Respond ONLY in valid JSON:
                   const polyYes = parseFloat(row.poly?.yes) || 0;
                   const polyNo = parseFloat(row.poly?.no) || 0;
                   const kalshiYes = parseFloat(row.kalshi?.yesAsk) || 0;
-                  const kalshiNo = parseFloat(row.kalshi?.noBid) || (kalshiYes ? 100 - kalshiYes : 0);
+                  const kalshiNo = parseFloat(row.kalshi?.noBid) || 0;
                   const best = !polyYes ? "kalshi" : !kalshiYes ? "poly" : polyYes < kalshiYes ? "poly" : kalshiYes < polyYes ? "kalshi" : "equal";
 
                   return (
@@ -645,7 +707,14 @@ Respond ONLY in valid JSON:
                         ) : "\u2014"}
                       </td>
                       <td style={{ ...tdP, color: "var(--text-ghost)" }}>
-                        {row.kalshi ? <span>{row.kalshi.noBid || (100 - kalshiYes).toFixed(1)}{"\u00A2"}</span> : "\u2014"}
+                        {row.kalshi ? (
+                          <div>
+                            <span>{row.kalshi.noAsk !== "0.0" ? row.kalshi.noAsk : "\u2014"}{row.kalshi.noAsk !== "0.0" ? "\u00A2" : ""}</span>
+                            {row.kalshi.noBid !== "0.0" && row.kalshi.noBid !== row.kalshi.noAsk && (
+                              <div style={{ fontSize: 9, color: "var(--text-ghost)" }}>bid {row.kalshi.noBid}{"\u00A2"}</div>
+                            )}
+                          </div>
+                        ) : "\u2014"}
                       </td>
                       <td style={tdP}>
                         {best === "equal" || (!polyYes && !kalshiYes) ? <span style={{ color: "var(--text-ghost)", fontSize: 11 }}>{"\u2014"}</span> :
@@ -667,7 +736,7 @@ Respond ONLY in valid JSON:
 
           {/* Arbitrage Education */}
           {result.matchQuality === "exact" && result.analysis?.conditionsIdentical && result.matchedOutcomes?.length > 0 && (
-            <ArbitrageEducation outcomes={result.matchedOutcomes} />
+            <ArbitrageEducation outcomes={result.matchedOutcomes} kalshiEndDate={result.kalshi?.endDate} />
           )}
 
           {/* AI Analysis */}
@@ -682,29 +751,30 @@ Respond ONLY in valid JSON:
   );
 }
 
-function ArbitrageEducation({ outcomes }) {
+function ArbitrageEducation({ outcomes, kalshiEndDate }) {
   const [open, setOpen] = useState(false);
+  const [totalBudget, setTotalBudget] = useState("1000");
 
+  // Find the best arbitrage pair across all matched outcomes
   let best = null;
+  let bestEndDate = null;
   for (const row of outcomes) {
     if (!row.poly || !row.kalshi || row.poly.expired || row.kalshi.expired) continue;
     const polyYes = parseFloat(row.poly.yes) || 0;
     const polyNo = parseFloat(row.poly.no) || 0;
     const kalshiYes = parseFloat(row.kalshi.yesAsk) || 0;
-    const kalshiNo = row.kalshi.noBid ? parseFloat(row.kalshi.noBid) : (kalshiYes ? 100 - kalshiYes : 0);
-    if (!polyYes || !kalshiYes) continue;
+    const kalshiNo = parseFloat(row.kalshi.noAsk) || parseFloat(row.kalshi.noBid) || 0;
+    if (!polyYes || !kalshiYes || !kalshiNo) continue;
 
     const combo1 = polyYes + kalshiNo;
     const combo2 = kalshiYes + polyNo;
     const bestCombo = Math.min(combo1, combo2);
     const isCombo1 = combo1 <= combo2;
 
-    if (bestCombo < 100 && (!best || bestCombo < best.total)) {
+    if (!best || bestCombo < best.total) {
       best = {
         outcome: row.poly.title || row.kalshi.title,
         total: bestCombo,
-        profitRaw: (100 - bestCombo).toFixed(1),
-        profitPct: ((100 - bestCombo) / bestCombo * 100).toFixed(1),
         isCombo1,
         polyYes, polyNo, kalshiYes, kalshiNo,
         buyYesPlatform: isCombo1 ? "Polymarket" : "Kalshi",
@@ -712,24 +782,78 @@ function ArbitrageEducation({ outcomes }) {
         buyNoPlatform: isCombo1 ? "Kalshi" : "Polymarket",
         buyNoPrice: isCombo1 ? kalshiNo : polyNo,
       };
+      bestEndDate = row.kalshi.endDate || kalshiEndDate || null;
     }
   }
 
   if (!best) return null;
 
-  const polyFeeRate = 0.01;
-  const kalshiFeePerContract = 2;
-  const polyLegPrice = best.isCombo1 ? best.polyYes : best.polyNo;
-  const kalshiLegPrice = best.isCombo1 ? best.kalshiNo : best.kalshiYes;
-  const polyFee = (polyLegPrice * polyFeeRate).toFixed(1);
-  const totalAfterFees = (parseFloat(polyLegPrice) + parseFloat(polyFee) + parseFloat(kalshiLegPrice) + kalshiFeePerContract).toFixed(1);
-  const profitAfterFees = (100 - parseFloat(totalAfterFees)).toFixed(1);
-  const stillProfitable = parseFloat(profitAfterFees) > 0;
+  const budget = parseFloat(totalBudget) || 1000;
 
-  const priceDiff = Math.abs(best.polyYes - best.kalshiYes).toFixed(1);
+  // --- Days until resolution (for Kalshi APY) ---
+  let daysToResolution = 0;
+  if (bestEndDate) {
+    const end = new Date(bestEndDate);
+    const now = new Date();
+    daysToResolution = Math.max(0, Math.ceil((end - now) / (1000 * 60 * 60 * 24)));
+  }
+  const KALSHI_APY = 0.0325;
+
+  // --- Per-share math (in cents) ---
+  const yP = best.buyYesPrice; // cents
+  const nP = best.buyNoPrice;  // cents
+
+  // Raw profit (no fees, no interest)
+  const rawCostPerPair = yP + nP; // cents
+  const rawProfitPerPair = 100 - rawCostPerPair; // cents
+
+  // Fees per pair
+  const POLY_FEE_RATE = 0.01;
+  const KALSHI_FEE_CENTS = 2; // ~2¢ per contract
+  const polyLegCents = best.buyYesPlatform === "Polymarket" ? yP : nP;
+  const polyFeeCents = polyLegCents * POLY_FEE_RATE;
+  const totalFeesPerPair = polyFeeCents + KALSHI_FEE_CENTS;
+
+  // Kalshi APY interest: earned on the Kalshi leg's locked collateral
+  // Kalshi locks $1 per contract (the max payout). Interest = $1 × APY × (days/365)
+  const kalshiInterestPerPair = daysToResolution > 0 ? (100 * KALSHI_APY * (daysToResolution / 365)) : 0; // in cents
+
+  const netProfitPerPair = rawProfitPerPair - totalFeesPerPair + kalshiInterestPerPair;
+
+  // --- Budget allocation ---
+  // Cost per pair in dollars (including fees)
+  const costPerPairDollars = (rawCostPerPair + totalFeesPerPair) / 100;
+  const shares = Math.floor(budget / costPerPairDollars);
+  const yesLegCost = shares * (yP / 100);
+  const noLegCost = shares * (nP / 100);
+  const totalFeesDollars = shares * (totalFeesPerPair / 100);
+  const totalCost = yesLegCost + noLegCost + totalFeesDollars;
+
+  // --- Outcome-specific P&L ---
+  // If YES wins: YES shares pay $1 each, NO shares worth $0
+  //   Payout = shares × $1 (from YES leg)
+  //   Lost = noLegCost (NO leg is worthless)
+  // If NO wins: NO shares pay $1 each, YES shares worth $0
+  //   Payout = shares × $1 (from NO leg)
+  //   Lost = yesLegCost (YES leg is worthless)
+  const kalshiInterestTotal = shares * (kalshiInterestPerPair / 100);
+  const payoutPerOutcome = shares * 1.0;
+
+  const profitIfYesWins = payoutPerOutcome - totalCost + kalshiInterestTotal;
+  const profitIfNoWins = payoutPerOutcome - totalCost + kalshiInterestTotal;
+  // Note: for hedged arb (equal shares both sides), profit is the same regardless of outcome
+  // The difference only matters if we had unequal allocations
+
+  const netProfitDollars = shares * (netProfitPerPair / 100);
+  const netProfitPct = totalCost > 0 ? (netProfitDollars / totalCost * 100) : 0;
+  const rawProfitDollars = shares * (rawProfitPerPair / 100);
+  const isArb = rawProfitPerPair > 0;
+  const isNetPositive = netProfitPerPair > 0;
+
   const cheaperPlatform = best.polyYes < best.kalshiYes ? "Polymarket" : "Kalshi";
-  const cheaperPrice = Math.min(best.polyYes, best.kalshiYes);
-  const savingsOn1000 = Math.round(parseFloat(priceDiff) * 1000 / cheaperPrice);
+  const priceDiffCents = Math.abs(best.polyYes - best.kalshiYes).toFixed(1);
+
+  const resDate = bestEndDate ? new Date(bestEndDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null;
 
   return (
     <div style={{ margin: "0 24px 20px" }}>
@@ -739,58 +863,238 @@ function ArbitrageEducation({ outcomes }) {
         cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center",
         color: "var(--text-primary)", fontSize: 13, fontWeight: 600, fontFamily: "var(--font-body)",
       }}>
-        Price Comparison: {best.outcome}
+        <span>
+          Arbitrage Calculator: {best.outcome}
+          {isNetPositive && (
+            <span style={{ marginLeft: 8, fontSize: 11, color: "var(--green)", fontFamily: "var(--font-mono)" }}>
+              +${netProfitDollars.toFixed(2)} net profit
+            </span>
+          )}
+        </span>
         <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{open ? "\u25B2" : "\u25BC"}</span>
       </button>
 
       {open && (
         <div style={{ padding: 20, background: "var(--bg-elevated)", borderRadius: "0 0 12px 12px", border: "1px solid var(--border)", borderTop: "none" }}>
-          <div style={{ marginBottom: 16 }}>
-            <div style={stepLabelStyle}>
-              Step 1: The Opportunity
-            </div>
-            <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.7, fontFamily: "var(--font-body)" }}>
-              Buy <b>YES "{best.outcome}"</b> on <span style={{ color: "var(--accent)", fontWeight: 600 }}>{best.buyYesPlatform}</span> at <b>{best.buyYesPrice}{"\u00A2"}</b> +
-              Buy <b>NO</b> on <span style={{ color: "var(--accent)", fontWeight: 600 }}>{best.buyNoPlatform}</span> at <b>{best.buyNoPrice}{"\u00A2"}</b>
-            </div>
-            <div style={{ marginTop: 8, fontSize: 13, fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
-              Total: <b>{best.total.toFixed(1)}{"\u00A2"}</b> {"\u2192"} Payout: <b>100{"\u00A2"}</b> {"\u2192"} Profit: <span style={{ color: "var(--green)", fontWeight: 600 }}>{best.profitRaw}{"\u00A2"} ({best.profitPct}%)</span>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 16 }}>
-            <div style={stepLabelStyle}>
-              Step 2: Fees
-            </div>
-            <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, fontFamily: "var(--font-body)" }}>
-              <div style={{ marginBottom: 4 }}>Polymarket taker fee (~1%): +{polyFee}{"\u00A2"}</div>
-              <div style={{ marginBottom: 4 }}>Kalshi trading fee: +{kalshiFeePerContract}{"\u00A2"} per contract</div>
-              <div style={{ marginTop: 8, fontWeight: 500, color: "var(--text-primary)" }}>
-                After fees: {totalAfterFees}{"\u00A2"} total {"\u2192"} Profit: <span style={{ color: stillProfitable ? "var(--green)" : "var(--red)", fontWeight: 600 }}>{profitAfterFees}{"\u00A2"} {!stillProfitable && "(negative)"}</span>
+          {/* Budget input */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={stepLabelStyle}>Total budget</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 15, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>$</span>
+              <input
+                type="text"
+                value={totalBudget}
+                onChange={(e) => setTotalBudget(e.target.value.replace(/[^0-9.]/g, ""))}
+                style={{
+                  width: 120, padding: "8px 12px", borderRadius: 0, fontSize: 15, fontWeight: 600,
+                  fontFamily: "var(--font-mono)", background: "var(--bg-deep)",
+                  border: "1px solid var(--border)", color: "var(--text-primary)", outline: "none",
+                }}
+              />
+              <div style={{ display: "flex", gap: 4 }}>
+                {["100", "1000", "5000", "10000"].map((v) => (
+                  <button key={v} onClick={() => setTotalBudget(v)} style={{
+                    padding: "6px 10px", borderRadius: 0, fontSize: 11, cursor: "pointer",
+                    fontFamily: "var(--font-mono)", border: "1px solid var(--border)",
+                    background: totalBudget === v ? "rgba(16,185,129,0.12)" : "var(--bg-deep)",
+                    color: totalBudget === v ? "var(--green)" : "var(--text-muted)",
+                  }}>
+                    ${Number(v).toLocaleString()}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
 
+          {/* Strategy + Allocation */}
           <div style={{ marginBottom: 16 }}>
-            <div style={stepLabelStyle}>
-              Step 3: Capital Lockup
+            <div style={stepLabelStyle}>Strategy & Allocation</div>
+            <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.7, fontFamily: "var(--font-body)", marginBottom: 10 }}>
+              Buy <b>{shares.toLocaleString()} shares</b> of <b>YES "{best.outcome}"</b> on{" "}
+              <span style={{ color: "var(--accent)", fontWeight: 600 }}>{best.buyYesPlatform}</span>{" "}
+              + <b>{shares.toLocaleString()} shares</b> of <b>NO</b> on{" "}
+              <span style={{ color: "var(--accent)", fontWeight: 600 }}>{best.buyNoPlatform}</span>
             </div>
-            <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, margin: 0, fontFamily: "var(--font-body)" }}>
-              {stillProfitable
-                ? `Even with ${profitAfterFees}\u00A2 profit per share, your capital is locked until the event resolves. Professional bots close these gaps in milliseconds.`
-                : `The fees eliminate the profit. Retail arbitrage doesn't work in prediction markets: margins are too thin and fees eat everything.`}
-            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ padding: "10px 12px", background: "var(--bg-deep)", border: "1px solid var(--border)" }}>
+                <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--accent)", marginBottom: 4, letterSpacing: "0.08em" }}>
+                  {best.buyYesPlatform} (YES)
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>
+                  ${yesLegCost.toFixed(2)}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                  {shares.toLocaleString()} × {yP}{"\u00A2"}
+                </div>
+              </div>
+              <div style={{ padding: "10px 12px", background: "var(--bg-deep)", border: "1px solid var(--border)" }}>
+                <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", marginBottom: 4, letterSpacing: "0.08em" }}>
+                  {best.buyNoPlatform} (NO)
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>
+                  ${noLegCost.toFixed(2)}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                  {shares.toLocaleString()} × {nP}{"\u00A2"}
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div style={{ padding: 14, borderRadius: 0, background: "var(--bg-deep)", border: "1px solid var(--border)" }}>
-            <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6, fontWeight: 600 }}>
-              Practical Takeaway
+          {/* Step 1: Raw spread (before fees) */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={stepLabelStyle}>1. Raw Spread (before fees)</div>
+            <div style={{
+              display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10,
+              fontSize: 13, fontFamily: "var(--font-mono)",
+            }}>
+              <div style={{ padding: "10px 12px", background: "var(--bg-deep)", border: "1px solid var(--border)", textAlign: "center" }}>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4, letterSpacing: "0.08em" }}>COST/PAIR</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>{rawCostPerPair.toFixed(1)}{"\u00A2"}</div>
+              </div>
+              <div style={{ padding: "10px 12px", background: "var(--bg-deep)", border: "1px solid var(--border)", textAlign: "center" }}>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4, letterSpacing: "0.08em" }}>PAYOUT</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>100{"\u00A2"}</div>
+              </div>
+              <div style={{ padding: "10px 12px", background: "var(--bg-deep)", border: `1px solid ${rawProfitPerPair > 0 ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)"}`, textAlign: "center" }}>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4, letterSpacing: "0.08em" }}>RAW PROFIT</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: rawProfitPerPair > 0 ? "var(--green)" : "var(--red)" }}>
+                  {rawProfitPerPair > 0 ? "+" : ""}{rawProfitPerPair.toFixed(1)}{"\u00A2"}
+                </div>
+              </div>
             </div>
-            <p style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.7, margin: 0, fontFamily: "var(--font-body)" }}>
-              If you want to bet on <b>{best.outcome}</b>, buy on <span style={{ color: "var(--accent)", fontWeight: 600 }}>{cheaperPlatform}</span> at <b>{cheaperPrice}{"\u00A2"}</b>.
-              You save <b>{priceDiff}{"\u00A2"}/share</b> {"\u2014"} on a $1,000 bet, that's <b>${savingsOn1000} extra profit</b>.
-            </p>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, fontFamily: "var(--font-body)" }}>
+              On ${budget.toLocaleString()}: <b style={{ color: rawProfitPerPair > 0 ? "var(--green)" : "var(--red)" }}>
+                {rawProfitDollars > 0 ? "+" : ""}${rawProfitDollars.toFixed(2)}
+              </b> raw profit ({shares.toLocaleString()} pairs)
+            </div>
           </div>
+
+          {/* Step 2: Fee breakdown */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={stepLabelStyle}>2. Fees</div>
+            <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.8, fontFamily: "var(--font-body)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>Polymarket taker (~1% on {polyLegCents.toFixed(1)}{"\u00A2"} leg)</span>
+                <span style={{ fontFamily: "var(--font-mono)", color: "var(--red)" }}>-{polyFeeCents.toFixed(2)}{"\u00A2"}/pair</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>Kalshi trading fee</span>
+                <span style={{ fontFamily: "var(--font-mono)", color: "var(--red)" }}>-{KALSHI_FEE_CENTS}{"\u00A2"}/pair</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--border)", paddingTop: 4, marginTop: 4 }}>
+                <span style={{ fontWeight: 500 }}>Total fees</span>
+                <span style={{ fontFamily: "var(--font-mono)", color: "var(--red)", fontWeight: 600 }}>-{totalFeesPerPair.toFixed(2)}{"\u00A2"}/pair</span>
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, fontFamily: "var(--font-body)" }}>
+              On ${budget.toLocaleString()}: <b style={{ color: "var(--red)" }}>-${totalFeesDollars.toFixed(2)}</b> in fees
+            </div>
+          </div>
+
+          {/* Step 3: Kalshi APY interest */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={stepLabelStyle}>3. Kalshi Interest (3.25% APY)</div>
+            {daysToResolution > 0 ? (
+              <>
+                <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.8, fontFamily: "var(--font-body)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>Resolution: {resDate} ({daysToResolution} days)</span>
+                    <span style={{ fontFamily: "var(--font-mono)", color: "var(--green)" }}>+{kalshiInterestPerPair.toFixed(2)}{"\u00A2"}/pair</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-ghost)", marginTop: 2 }}>
+                    Kalshi pays 3.25% APY on locked collateral ($1/contract × {daysToResolution}d / 365d)
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, fontFamily: "var(--font-body)" }}>
+                  On ${budget.toLocaleString()}: <b style={{ color: "var(--green)" }}>+${kalshiInterestTotal.toFixed(2)}</b> earned
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 13, color: "var(--text-ghost)", fontFamily: "var(--font-body)" }}>
+                Resolution date unknown — cannot calculate interest
+              </div>
+            )}
+          </div>
+
+          {/* Step 4: Net P&L */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={stepLabelStyle}>4. Net Profit</div>
+            <div style={{
+              padding: "14px 16px", background: "var(--bg-deep)",
+              border: `1px solid ${isNetPositive ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)"}`,
+            }}>
+              {/* Calculation breakdown */}
+              <div style={{ fontSize: 13, fontFamily: "var(--font-mono)", color: "var(--text-secondary)", lineHeight: 2, marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>Raw profit</span>
+                  <span>{rawProfitPerPair > 0 ? "+" : ""}{rawProfitPerPair.toFixed(2)}{"\u00A2"}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>Fees</span>
+                  <span style={{ color: "var(--red)" }}>-{totalFeesPerPair.toFixed(2)}{"\u00A2"}</span>
+                </div>
+                {daysToResolution > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>Kalshi interest</span>
+                    <span style={{ color: "var(--green)" }}>+{kalshiInterestPerPair.toFixed(2)}{"\u00A2"}</span>
+                  </div>
+                )}
+                <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--border)", paddingTop: 6, marginTop: 4 }}>
+                  <span style={{ fontWeight: 700 }}>Net per pair</span>
+                  <span style={{ fontWeight: 700, color: isNetPositive ? "var(--green)" : "var(--red)" }}>
+                    {netProfitPerPair > 0 ? "+" : ""}{netProfitPerPair.toFixed(2)}{"\u00A2"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Guaranteed profit */}
+              <div style={{ textAlign: "center", padding: "12px 0 0", borderTop: "1px solid var(--border)" }}>
+                <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", marginBottom: 4, letterSpacing: "0.08em" }}>
+                  GUARANTEED PROFIT (ANY OUTCOME)
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-mono)", color: isNetPositive ? "var(--green)" : "var(--red)" }}>
+                  {netProfitDollars > 0 ? "+" : ""}${netProfitDollars.toFixed(2)}
+                </div>
+                {isNetPositive && (
+                  <div style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--text-muted)", marginTop: 4 }}>
+                    ROI: {netProfitPct.toFixed(2)}%{daysToResolution > 0 && ` over ${daysToResolution} days (${(netProfitPct * 365 / daysToResolution).toFixed(1)}% annualized)`}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Disclaimer */}
+          <div style={{
+            padding: 14, borderRadius: 0, background: "var(--bg-deep)",
+            border: "1px solid var(--border)", borderLeft: "2px solid var(--warning)",
+          }}>
+            <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--warning)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6, fontWeight: 600 }}>
+              Important
+            </div>
+            <ul style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.7, margin: 0, paddingLeft: 16, fontFamily: "var(--font-body)" }}>
+              <li>These prices are <b>best bid-ask at the time of lookup</b>. Large orders will move the price — check <b>order book depth</b> before trading.</li>
+              <li>Low volume markets can't absorb large positions without significant <b>slippage</b>. Your actual fill price may differ.</li>
+              <li>Verify that both markets have <b>identical resolution conditions</b> — similar-looking markets can resolve differently.</li>
+            </ul>
+          </div>
+
+          {/* Simple price comparison for non-arb */}
+          {!isArb && parseFloat(priceDiffCents) > 0.5 && (
+            <div style={{
+              marginTop: 14, padding: 14, borderRadius: 0, background: "var(--bg-deep)",
+              border: "1px solid var(--border)",
+            }}>
+              <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6, fontWeight: 600 }}>
+                No arbitrage, but prices differ
+              </div>
+              <p style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.7, margin: 0, fontFamily: "var(--font-body)" }}>
+                YES is cheaper on <span style={{ color: "var(--accent)", fontWeight: 600 }}>{cheaperPlatform}</span> by <b>{priceDiffCents}{"\u00A2"}/share</b>.
+                On a ${budget.toLocaleString()} position, that's <b>${Math.round(parseFloat(priceDiffCents) * shares / 100)} saved</b>.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

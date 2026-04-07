@@ -3,12 +3,9 @@
  *
  * Analyses trade data for a set of traders and computes:
  *  - Bot score + classification (via walletMetrics + fallbackClassification)
- *  - Win rate overall and by market category
- *  - Trades/day, avg hold time, active hours/day
+ *  - ROI % (PnL / Volume from leaderboard — instant, no extra API calls)
+ *  - Trades/day, active hours/day
  *  - Category distribution
- *
- * All metrics are computed from on-chain trade data only.
- * PnL comes from the leaderboard API (all-time).
  */
 
 import { computeWalletMetrics } from "./walletMetrics";
@@ -72,60 +69,10 @@ export function analyzeTrader(address, trades, leaderboardEntry = {}) {
   ).size;
   const activeHoursPerDay = Math.min(24, dayHourSlots.size / Math.max(uniqueDays, 1));
 
-  // ── Build buy/sell pairs per market ──────────────────────────────────────
-  const byMarket = {};
-  for (const t of trades) {
-    const key = t.conditionId || t.title || t.market || "?";
-    if (!byMarket[key]) byMarket[key] = [];
-    byMarket[key].push(t);
-  }
-
-  const pairs = []; // { buyTs, sellTs, buyPrice, sellPrice, category, holdMin, isWin }
-  for (const mTrades of Object.values(byMarket)) {
-    const sorted = mTrades.slice().sort((a, b) => (ts(a) || 0) - (ts(b) || 0));
-    let lastBuy = null;
-    for (const t of sorted) {
-      const side = (t.side || "").toUpperCase();
-      if (side === "BUY" || side === "B") {
-        lastBuy = t;
-      } else if ((side === "SELL" || side === "S") && lastBuy) {
-        const buyTs = ts(lastBuy) || 0;
-        const sellTs = ts(t) || 0;
-        const buyPrice = parseFloat(lastBuy.price) || 0;
-        const sellPrice = parseFloat(t.price) || 0;
-        if (buyPrice > 0 && sellPrice > 0) {
-          pairs.push({
-            buyTs,
-            sellTs,
-            buyPrice,
-            sellPrice,
-            category: getMarketCategory(lastBuy),
-            holdMin: buyTs && sellTs ? (sellTs - buyTs) / 60000 : null,
-            isWin: sellPrice > buyPrice,
-          });
-        }
-        lastBuy = null;
-      }
-    }
-  }
-
-  // ── Win rate overall ──────────────────────────────────────────────────────
-  const winRate = pairs.length >= 3
-    ? pairs.filter((p) => p.isWin).length / pairs.length
-    : null;
-
-  // ── Win rate by category ──────────────────────────────────────────────────
-  const winRateByCategory = {};
-  for (const cat of CATEGORIES) {
-    const catPairs = pairs.filter((p) => p.category === cat);
-    if (catPairs.length >= 2) {
-      winRateByCategory[cat] = catPairs.filter((p) => p.isWin).length / catPairs.length;
-    }
-  }
-
-  // ── Hold time ────────────────────────────────────────────────────────────
-  const holdTimes = pairs.map((p) => p.holdMin).filter((h) => h !== null && h >= 0);
-  const avgHoldMinutes = holdTimes.length > 0 ? mean(holdTimes) : null;
+  // ── ROI % (from leaderboard data — instant) ─────────────────────────────
+  const pnl = leaderboardEntry.pnl != null ? parseFloat(leaderboardEntry.pnl) || null : null;
+  const volume = typeof leaderboardEntry.vol === "number" ? leaderboardEntry.vol : null;
+  const roi = (pnl !== null && volume && volume > 0) ? (pnl / volume) : null;
 
   // ── Category distribution (% of trades) ─────────────────────────────────
   const catCounts = {};
@@ -149,15 +96,12 @@ export function analyzeTrader(address, trades, leaderboardEntry = {}) {
     classification: bot.classification,
     tradeCount: trades.length,
     tradesPerDay: Math.round(tradesPerDay * 10) / 10,
-    avgHoldMinutes,
     activeHoursPerDay: Math.round(activeHoursPerDay * 10) / 10,
-    winRate,
-    winRateByCategory,
+    roi,
     categoryDist,
     primaryCategory,
-    pnl: leaderboardEntry.pnl != null ? parseFloat(leaderboardEntry.pnl) || null : null,
-    volume: typeof leaderboardEntry.vol === "number" ? leaderboardEntry.vol : null,
-    pairCount: pairs.length,
+    pnl,
+    volume,
     spanDays: Math.round(spanDays),
   };
 }
@@ -174,35 +118,18 @@ export function computeAggregates(traders, categoryFilter = "All") {
   const bots = traders.filter((t) => t.classification === "Bot");
   const humans = traders.filter((t) => t.classification !== "Bot");
 
-  function getWinRate(trader) {
-    if (categoryFilter === "All") return trader.winRate;
-    return trader.winRateByCategory?.[categoryFilter] ?? null;
-  }
-
   function groupStats(group) {
-    const withWinRate = group.filter((t) => getWinRate(t) !== null);
-    const withHold = group.filter((t) => t.avgHoldMinutes !== null);
+    const withRoi = group.filter((t) => t.roi !== null);
     const totalPnl = sum(group.map((t) => t.pnl));
+    const totalVol = sum(group.map((t) => t.volume));
     return {
       count: group.length,
-      avgWinRate: mean(withWinRate.map(getWinRate)),
+      avgRoi: mean(withRoi.map((t) => t.roi)),
       totalPnl,
+      totalVolume: totalVol,
       avgTradesPerDay: mean(group.map((t) => t.tradesPerDay)),
-      avgHoldMinutes: mean(withHold.map((t) => t.avgHoldMinutes)),
       avgActiveHours: mean(group.map((t) => t.activeHoursPerDay)),
-      winRateByCategory: computeCategoryWinRates(group),
     };
-  }
-
-  function computeCategoryWinRates(group) {
-    const result = {};
-    for (const cat of CATEGORIES) {
-      const rates = group
-        .map((t) => t.winRateByCategory?.[cat])
-        .filter((r) => r !== undefined && r !== null);
-      if (rates.length >= 1) result[cat] = mean(rates);
-    }
-    return result;
   }
 
   const allPnl = sum(traders.map((t) => t.pnl));
@@ -220,33 +147,9 @@ export function computeAggregates(traders, categoryFilter = "All") {
   };
 }
 
-// ── Category chart data ───────────────────────────────────────────────────────
-
-/**
- * Returns data array for Recharts grouped bar chart.
- * Each entry: { category, bots: 0-100, humans: 0-100 }
- */
-export function buildCategoryChartData(aggregates) {
-  if (!aggregates) return [];
-  const displayed = CATEGORIES.filter((cat) => {
-    const b = aggregates.bots.winRateByCategory?.[cat];
-    const h = aggregates.humans.winRateByCategory?.[cat];
-    return b !== undefined || h !== undefined;
-  });
-  return displayed.map((cat) => {
-    const b = aggregates.bots.winRateByCategory?.[cat];
-    const h = aggregates.humans.winRateByCategory?.[cat];
-    return {
-      category: cat === "Pop Culture" ? "Pop" : cat,
-      bots: b !== undefined ? Math.round(b * 100) : null,
-      humans: h !== undefined ? Math.round(h * 100) : null,
-    };
-  });
-}
-
 // ── localStorage cache ────────────────────────────────────────────────────────
 
-const CACHE_KEY = "polyalpha_agent_tracker_v1";
+const CACHE_KEY = "polyalpha_agent_tracker_v4"; // bumped — ROI replaces win rate
 const CACHE_TTL = 30 * 60 * 1000; // 30 min
 
 export function loadTrackerCache() {
@@ -278,14 +181,16 @@ export function fmtPnl(n) {
   return `${sign}$${abs.toFixed(0)}`;
 }
 
-export function fmtHold(minutes) {
-  if (minutes === null || minutes === undefined) return "N/A";
-  if (minutes < 60) return `${Math.round(minutes)}min`;
-  if (minutes < 1440) return `${(minutes / 60).toFixed(1)}hr`;
-  return `${(minutes / 1440).toFixed(1)}d`;
-}
-
 export function fmtPct(rate) {
   if (rate === null || rate === undefined) return "N/A";
   return `${Math.round(rate * 100)}%`;
+}
+
+export function fmtRoi(roi) {
+  if (roi === null || roi === undefined) return "N/A";
+  const pct = roi * 100;
+  const sign = pct >= 0 ? "+" : "";
+  if (Math.abs(pct) >= 1000) return `${sign}${Math.round(pct / 100) * 100}%`;
+  if (Math.abs(pct) >= 100) return `${sign}${Math.round(pct)}%`;
+  return `${sign}${pct.toFixed(1)}%`;
 }

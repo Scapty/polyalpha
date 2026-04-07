@@ -1,14 +1,10 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip,
-  ResponsiveContainer, Cell, CartesianGrid,
-} from "recharts";
 import { fetchTopTraders, fetchWalletTrades } from "../../utils/api";
 import {
-  analyzeTrader, computeAggregates, buildCategoryChartData,
+  analyzeTrader, computeAggregates,
   loadTrackerCache, saveTrackerCache,
-  fmtPnl, fmtHold, fmtPct,
+  fmtPnl, fmtRoi,
 } from "../../utils/agentTrackerEngine";
 import SpotlightCard from "../shared/SpotlightCard";
 
@@ -125,23 +121,6 @@ function SortHeader({ col, label: lbl, sortBy, sortDir, onSort }) {
   );
 }
 
-function CategoryTooltip({ active, payload, label: lbl }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div style={{
-      background: "var(--bg-elevated)", border: "1px solid var(--border)",
-      borderRadius: 0, padding: "10px 14px", fontSize: 12, fontFamily: "var(--font-mono)",
-    }}>
-      <div style={{ color: "var(--text-muted)", marginBottom: 6, fontSize: 11 }}>{lbl}</div>
-      {payload.map((p) => (
-        <div key={p.name} style={{ color: p.color, marginBottom: 2 }}>
-          {p.name === "bots" ? "Bots" : "Humans"}: {p.value !== null ? `${p.value}%` : "—"}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function AgentTracker() {
@@ -227,17 +206,6 @@ export default function AgentTracker() {
     [traders, categoryLabel]
   );
 
-  const chartData = useMemo(
-    () => buildCategoryChartData(aggregates),
-    [aggregates]
-  );
-
-  // Only show chart if bots have at least one category win rate value
-  const chartHasBotData = useMemo(
-    () => chartData.some((d) => d.bots !== null),
-    [chartData]
-  );
-
   const sortedTraders = useMemo(() => {
     return [...traders].sort((a, b) => {
       const va = a[sortBy] ?? (sortDir === "asc" ? Infinity : -Infinity);
@@ -251,27 +219,6 @@ export default function AgentTracker() {
     if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortBy(col); setSortDir("desc"); }
   }
-
-  // ── Insight sentence ────────────────────────────────────────────────────────
-
-  const insight = useMemo(() => {
-    if (!aggregates || aggregates.botCount === 0 || aggregates.humanCount === 0) return null;
-    const cats = Object.keys(aggregates.bots.winRateByCategory || {});
-    let biggest = null, biggestDiff = 0;
-    for (const cat of cats) {
-      const b = aggregates.bots.winRateByCategory[cat];
-      const h = aggregates.humans.winRateByCategory?.[cat];
-      if (b === undefined || h === undefined) continue;
-      const diff = Math.abs(b - h);
-      if (diff > biggestDiff) { biggestDiff = diff; biggest = { cat, b, h }; }
-    }
-    if (!biggest) return null;
-    const lead = biggest.b > biggest.h ? "Bots lead" : "Humans lead";
-    const trail = biggest.b > biggest.h
-      ? `bots outperform humans by ${Math.round((biggest.b - biggest.h) * 100)}pp`
-      : `humans outperform bots by ${Math.round((biggest.h - biggest.b) * 100)}pp`;
-    return `On ${biggest.cat} markets, ${trail} in win rate.`;
-  }, [aggregates]);
 
   // ── Last scan label ─────────────────────────────────────────────────────────
 
@@ -453,8 +400,8 @@ export default function AgentTracker() {
             />
           </div>
 
-          {/* ── Head-to-head + Category chart ───────────────────────────── */}
-          <div style={{ display: "grid", gridTemplateColumns: chartHasBotData ? "repeat(auto-fit, minmax(min(100%, 360px), 1fr))" : "1fr", gap: 16 }}>
+          {/* ── Head-to-head ───────────────────────────────────────────── */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
 
             {/* Head-to-head */}
             <div style={card}>
@@ -475,9 +422,9 @@ export default function AgentTracker() {
 
               {[
                 {
-                  title: "Avg Win Rate",
-                  botVal: fmtPct(aggregates.bots.avgWinRate),
-                  humanVal: fmtPct(aggregates.humans.avgWinRate),
+                  title: "Avg ROI",
+                  botVal: fmtRoi(aggregates.bots.avgRoi),
+                  humanVal: fmtRoi(aggregates.humans.avgRoi),
                 },
                 {
                   title: "Total P&L",
@@ -492,11 +439,6 @@ export default function AgentTracker() {
                   humanVal: aggregates.humans.avgTradesPerDay !== null
                     ? Math.round(aggregates.humans.avgTradesPerDay)
                     : "N/A",
-                },
-                {
-                  title: "Avg Hold Time",
-                  botVal: fmtHold(aggregates.bots.avgHoldMinutes),
-                  humanVal: fmtHold(aggregates.humans.avgHoldMinutes),
                 },
                 {
                   title: "Active Hours / Day",
@@ -534,57 +476,6 @@ export default function AgentTracker() {
               )}
             </div>
 
-            {/* Category win rate chart — only shown when bot data is available */}
-            {chartHasBotData && (
-              <div style={card}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
-                    Win Rate by Category
-                  </div>
-                  <div style={{ display: "flex", gap: 16 }}>
-                    {[{ label: "Bots", color: BOT_COLOR }, { label: "Humans", color: HUMAN_COLOR }].map((l) => (
-                      <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <div style={{ width: 10, height: 10, borderRadius: 0, background: l.color }} />
-                        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{l.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {insight && (
-                  <div style={{
-                    fontSize: 11, color: "var(--text-muted)", fontStyle: "italic",
-                    marginBottom: 16, lineHeight: 1.5,
-                  }}>
-                    {insight}
-                  </div>
-                )}
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={chartData} barCategoryGap="30%" barGap={4}>
-                    <CartesianGrid
-                      strokeDasharray="3 3"
-                      stroke="rgba(255,255,255,0.04)"
-                      vertical={false}
-                    />
-                    <XAxis
-                      dataKey="category"
-                      tick={{ fill: "var(--text-muted)", fontSize: 10, fontFamily: "var(--font-mono)" }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      domain={[0, 100]}
-                      tick={{ fill: "var(--text-muted)", fontSize: 10, fontFamily: "var(--font-mono)" }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(v) => `${v}%`}
-                    />
-                    <RTooltip content={<CategoryTooltip />} cursor={{ fill: "rgba(255,255,255,0.03)" }} />
-                    <Bar dataKey="bots" name="bots" fill={BOT_COLOR} radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="humans" name="humans" fill={HUMAN_COLOR} radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
           </div>
 
           {/* ── Trader table ─────────────────────────────────────────────── */}
@@ -601,10 +492,9 @@ export default function AgentTracker() {
                       { col: "userName", label: "Trader" },
                       { col: "botScore", label: "Bot Score" },
                       { col: "classification", label: "Class" },
-                      { col: "winRate", label: "Win Rate" },
+                      { col: "roi", label: "ROI" },
                       { col: "pnl", label: "P&L" },
                       { col: "tradesPerDay", label: "Trades/Day" },
-                      { col: "avgHoldMinutes", label: "Avg Hold" },
                       { col: "primaryCategory", label: "Focus" },
                     ].map((h) => (
                       <SortHeader key={h.col} {...h} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
@@ -658,8 +548,11 @@ export default function AgentTracker() {
                             {trader.classification || "—"}
                           </span>
                         </td>
-                        <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
-                          {fmtPct(trader.winRate)}
+                        <td style={{
+                          padding: "10px 12px", fontFamily: "var(--font-mono)", fontWeight: 500,
+                          color: trader.roi > 0 ? "var(--green)" : trader.roi < 0 ? "var(--red)" : "var(--text-muted)",
+                        }}>
+                          {fmtRoi(trader.roi)}
                         </td>
                         <td style={{
                           padding: "10px 12px", fontFamily: "var(--font-mono)", fontWeight: 600,
@@ -669,9 +562,6 @@ export default function AgentTracker() {
                         </td>
                         <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
                           {trader.tradesPerDay !== null ? Math.round(trader.tradesPerDay) : "N/A"}
-                        </td>
-                        <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
-                          {fmtHold(trader.avgHoldMinutes)}
                         </td>
                         <td style={{ padding: "10px 12px", color: "var(--text-muted)", fontSize: 11 }}>
                           {trader.primaryCategory}
