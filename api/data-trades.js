@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   try {
     const response = await fetch(url);
     const data = await response.json();
-    res.setHeader("Cache-Control", "s-maxage=120, stale-while-revalidate=60");
+    res.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=15");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.status(response.status).json(data);
   } catch (err) {

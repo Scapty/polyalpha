@@ -69,7 +69,7 @@ const FEATURES = [
   {
     label: "Agent Tracker",
     title: "AI agent monitoring and leaderboard analytics",
-    desc: "Track AI agents and top traders on Polymarket. Analyze P&L, win rates, hold times, and trading categories across the leaderboard.",
+    desc: "Track bots and top traders on Polymarket. Analyze P&L, volume, and trading patterns across the leaderboard.",
     stat: { label: "Data source", value: "Polymarket API" },
   },
 ];

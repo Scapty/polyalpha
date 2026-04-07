@@ -7,6 +7,32 @@ function getApiKey() { return localStorage.getItem("polyalpha_api_key") || ""; }
 
 const norm = (s) => s.toLowerCase().replace(/[.\-']/g, "").replace(/\s+/g, " ").trim();
 
+// Levenshtein distance for fuzzy word matching
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => i);
+  for (let j = 1; j <= n; j++) {
+    let prev = dp[0]; dp[0] = j;
+    for (let i = 1; i <= m; i++) {
+      const tmp = dp[i];
+      dp[i] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[i], dp[i - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[m];
+}
+
+// Check if two words are fuzzy-similar (e.g. "munich" vs "munchen")
+function fuzzyWordMatch(a, b) {
+  if (a === b) return true;
+  if (a.includes(b) || b.includes(a)) return true;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen <= 2) return a === b;
+  const threshold = maxLen <= 5 ? 1 : Math.floor(maxLen * 0.3);
+  return levenshtein(a, b) <= threshold;
+}
+
 export default function ArbitrageScanner() {
   const [url, setUrl] = useState("");
   const [searching, setSearching] = useState(false);
@@ -150,7 +176,10 @@ Search: site:${otherPlatform === "Kalshi" ? "kalshi.com" : "polymarket.com"} ${s
 
 IMPORTANT: Extract the ticker/slug from the URL you find.
 ${otherPlatform === "Kalshi"
-  ? "Kalshi URLs: kalshi.com/markets/TICKER/... → extract TICKER (e.g., KXMLB, KXPRESPERSON)"
+  ? `Kalshi URLs have this format: kalshi.com/markets/SERIES-TICKER/EVENT-SUBTITLE/MARKET
+Extract the FULL event ticker (e.g., KXUCLGAME-26APR07RMABMU, not just KXUCLGAME).
+The event ticker includes the date and team codes. Return it as "eventTicker".
+Also return the series ticker (e.g., KXUCLGAME) as "seriesTicker".`
   : "Polymarket URLs: polymarket.com/event/SLUG → extract SLUG"}
 
 MATCHING RULES:
@@ -162,7 +191,7 @@ Respond ONLY in valid JSON:
 {
   "found": true or false,
   "title": "title on ${otherPlatform}",
-  "${otherPlatform === "Kalshi" ? "seriesTicker" : "slug"}": "extracted from URL",
+  ${otherPlatform === "Kalshi" ? '"eventTicker": "full event ticker with date (e.g. KXUCLGAME-26APR07RMABMU)",\n  "seriesTicker": "series ticker (e.g. KXUCLGAME)"' : '"slug": "extracted from URL"'},
   "url": "full URL",
   "matchQuality": "exact or similar or none",
   "explanation": "1-2 sentences"
@@ -170,7 +199,7 @@ Respond ONLY in valid JSON:
 
         if (aiResult.found && !otherData) {
           setSearchStep(`Fetching ${otherPlatform} prices...`);
-          let ticker = aiResult.seriesTicker || aiResult.eventTicker || null;
+          let ticker = aiResult.eventTicker || aiResult.seriesTicker || null;
           let slug = aiResult.slug || null;
           if (!ticker && !slug && aiResult.url) {
             if (otherPlatform === "Kalshi") {
@@ -250,12 +279,22 @@ Respond ONLY in valid JSON:
         const koNorm = norm(ko.title);
 
         let nameScore = 0;
+        const koWords = koNorm.split(" ").filter(w => w.length > 1);
         if (koNorm === poNorm) nameScore = 100;
         else if (koNorm.includes(poNorm) || poNorm.includes(koNorm)) nameScore = 80;
         else if (koNorm.startsWith(poNorm) || poNorm.startsWith(koNorm)) nameScore = 70;
         else {
-          const wordHits = poWords.filter(w => koNorm.includes(w)).length;
-          nameScore = poWords.length > 0 ? (wordHits / poWords.length) * 60 : 0;
+          // Fuzzy word matching: "munich" ~ "munchen", "fc bayern" ~ "bayern"
+          const fuzzyHits = poWords.filter(pw =>
+            koWords.some(kw => fuzzyWordMatch(pw, kw))
+          ).length;
+          const reverseHits = koWords.filter(kw =>
+            poWords.some(pw => fuzzyWordMatch(kw, pw))
+          ).length;
+          // Use best ratio from either direction (handles "FC Bayern München" vs "Bayern Munich")
+          const forwardRatio = poWords.length > 0 ? fuzzyHits / poWords.length : 0;
+          const reverseRatio = koWords.length > 0 ? reverseHits / koWords.length : 0;
+          nameScore = Math.max(forwardRatio, reverseRatio) * 60;
         }
 
         let dateBonus = 0;
@@ -350,12 +389,24 @@ Respond ONLY in valid JSON:
     let data = await res.json();
     let markets = data.markets || [];
 
-    // If no markets found, treat as series ticker → fetch events → pick first event
+    // If no markets found, treat as series ticker → fetch events → pick best matching event
     if (markets.length === 0) {
-      const evRes = await fetch(`/api/kalshi/events?series_ticker=${seriesOrEventTicker}&status=open&limit=5`);
+      const evRes = await fetch(`/api/kalshi/events?series_ticker=${seriesOrEventTicker}&status=open&limit=50`);
       const evData = await evRes.json();
-      if (evData.events?.[0]) {
-        res = await fetch(`/api/kalshi/markets?event_ticker=${evData.events[0].event_ticker}&limit=100`);
+      const events = evData.events || [];
+      if (events.length > 0) {
+        // Try to pick the event closest to today (most relevant upcoming event)
+        const now = new Date();
+        let bestEvent = events[0];
+        let bestDiff = Infinity;
+        for (const ev of events) {
+          const closeTime = ev.close_time || ev.expiration_time || "";
+          if (closeTime) {
+            const diff = Math.abs(new Date(closeTime) - now);
+            if (diff < bestDiff) { bestDiff = diff; bestEvent = ev; }
+          }
+        }
+        res = await fetch(`/api/kalshi/markets?event_ticker=${bestEvent.event_ticker}&limit=100`);
         data = await res.json();
         markets = data.markets || [];
       }
@@ -735,8 +786,8 @@ Respond ONLY in valid JSON:
           </div>
 
           {/* Arbitrage Education */}
-          {result.matchQuality === "exact" && result.analysis?.conditionsIdentical && result.matchedOutcomes?.length > 0 && (
-            <ArbitrageEducation outcomes={result.matchedOutcomes} kalshiEndDate={result.kalshi?.endDate} />
+          {result.matchQuality === "exact" && result.matchedOutcomes?.length > 0 && (
+            <ArbitrageEducation outcomes={result.matchedOutcomes} kalshiEndDate={result.kalshi?.endDate} conditionsDiffer={!result.analysis?.conditionsIdentical} />
           )}
 
           {/* AI Analysis */}
@@ -751,7 +802,7 @@ Respond ONLY in valid JSON:
   );
 }
 
-function ArbitrageEducation({ outcomes, kalshiEndDate }) {
+function ArbitrageEducation({ outcomes, kalshiEndDate, conditionsDiffer }) {
   const [open, setOpen] = useState(false);
   const [totalBudget, setTotalBudget] = useState("1000");
 
@@ -876,6 +927,11 @@ function ArbitrageEducation({ outcomes, kalshiEndDate }) {
 
       {open && (
         <div style={{ padding: 20, background: "var(--bg-elevated)", borderRadius: "0 0 12px 12px", border: "1px solid var(--border)", borderTop: "none" }}>
+          {conditionsDiffer && (
+            <div style={{ padding: "10px 14px", marginBottom: 16, borderRadius: 8, background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.25)", fontSize: 12, color: "var(--yellow, #eab308)", fontFamily: "var(--font-body)" }}>
+              ⚠ Resolution conditions differ between platforms. Verify rules before trading.
+            </div>
+          )}
           {/* Budget input */}
           <div style={{ marginBottom: 20 }}>
             <div style={stepLabelStyle}>Total budget</div>

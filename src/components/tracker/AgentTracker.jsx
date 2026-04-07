@@ -245,7 +245,7 @@ export default function AgentTracker() {
       <div className="page-header" style={{ animation: "fadeInUp 0.4s var(--ease-smooth) both" }}>
         <div className="section-number">02</div>
         <h1>Agent Tracker</h1>
-        <p>Track AI agents and top traders. Analyze P&L, win rates, hold times, and categories across the leaderboard.</p>
+        <p>Track bots and top traders. Analyze P&L, volume, and trading patterns across the leaderboard.</p>
       </div>
 
       {/* ── Controls ─────────────────────────────────────────────────────── */}
