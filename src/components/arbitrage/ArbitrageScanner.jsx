@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import GlowingInput from "../shared/GlowingInput";
 import SpotlightCard from "../shared/SpotlightCard";
+import ProPaywall from "../shared/ProPaywall";
+import PricingModal from "../shared/PricingModal";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 function getApiKey() { return localStorage.getItem("polyalpha_api_key") || ""; }
@@ -33,12 +35,43 @@ function fuzzyWordMatch(a, b) {
   return levenshtein(a, b) <= threshold;
 }
 
-export default function ArbitrageScanner() {
+export default function ArbitrageScanner({ plan = "free", setPlan }) {
   const [url, setUrl] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchStep, setSearchStep] = useState("");
   const [result, setResult] = useState(null);
+  const [showPricing, setShowPricing] = useState(false);
+
+  const isPro = plan === "pro" || plan === "elite";
+  const isElite = plan === "elite";
   const [error, setError] = useState(null);
+
+  function checkFreeLimit() {
+    if (isPro) return true;
+    const key = "dexio_oddz_daily";
+    try {
+      const stored = JSON.parse(localStorage.getItem(key) || "{}");
+      const today = new Date().toISOString().slice(0, 10);
+      if (stored.date === today && stored.count >= 1) return false;
+      return true;
+    } catch { return true; }
+  }
+
+  function incrementFreeUsage() {
+    if (isPro) return;
+    const key = "dexio_oddz_daily";
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+      const stored = JSON.parse(localStorage.getItem(key) || "{}");
+      if (stored.date === today) {
+        stored.count = (stored.count || 0) + 1;
+      } else {
+        stored.date = today;
+        stored.count = 1;
+      }
+      localStorage.setItem(key, JSON.stringify(stored));
+    } catch {}
+  }
 
   function detectPlatform(input) {
     const lower = input.trim().toLowerCase();
@@ -65,6 +98,11 @@ export default function ArbitrageScanner() {
 
   const handleSearch = async () => {
     if (!url.trim()) return;
+    if (!checkFreeLimit()) {
+      setError("Free plan: 1 analysis per day. Upgrade to Pro for unlimited analyses.");
+      setShowPricing(true);
+      return;
+    }
     const apiKey = getApiKey();
     if (!apiKey) { setError("Set your Anthropic API key first."); return; }
     const platform = detectPlatform(url);
@@ -241,6 +279,9 @@ Respond ONLY in valid JSON:
       setSearchStep("Building analysis...");
       const analysis = await buildAnalysisFromData(apiKey, polyData, kalshiData, aiResult.matchQuality, matched);
 
+      // Count as a successful analysis (uses free daily limit)
+      if (aiResult.found) incrementFreeUsage();
+
       setResult({
         found: aiResult.found,
         matchQuality: aiResult.matchQuality,
@@ -365,13 +406,14 @@ Respond ONLY in valid JSON:
         } catch {}
         const mEndDate = m.endDate || ev.endDate || "";
         const isClosed = m.closed === true || m.active === false;
-        const isExpired = mEndDate ? new Date(mEndDate) < new Date() : false;
+        const hasActivePrice = y > 0 && y < 1;
+        const isExpired = isClosed || (!hasActivePrice && mEndDate && new Date(mEndDate) < new Date());
         return {
           title: m.groupItemTitle || m.question || "",
           yes: (y * 100).toFixed(1),
           no: (n * 100).toFixed(1),
           endDate: mEndDate,
-          expired: isExpired || isClosed,
+          expired: isExpired,
         };
       }),
     };
@@ -460,7 +502,13 @@ Respond ONLY in valid JSON:
     const volume24h = markets.reduce((s, m) => s + (parseFloat(m.volume_24h_fp) || 0), 0);
     const volumeTotal = markets.reduce((s, m) => s + (parseFloat(m.volume_fp) || 0), 0);
     const firstMarket = markets[0] || {};
-    const rules = firstMarket.rules_primary || "";
+    // Generalize rules: replace candidate-specific name with placeholder so AI understands
+    // this is a multi-outcome market, not a binary bet on one candidate
+    let rules = firstMarket.rules_primary || "";
+    const firstOutcomeName = firstMarket.yes_sub_title || "";
+    if (firstOutcomeName && markets.length > 1) {
+      rules = rules.replaceAll(firstOutcomeName, "[each candidate]");
+    }
     const expiration = firstMarket.expiration_time || firstMarket.close_time || "";
     return {
       eventTitle, volume24h, volumeTotal,
@@ -468,7 +516,8 @@ Respond ONLY in valid JSON:
       endDate: expiration,
       outcomes: markets.map((m) => {
         const exp = m.expiration_time || m.close_time || expiration || "";
-        const isExpired = exp ? new Date(exp) < new Date() : false;
+        const hasActivePrice = parseFloat(m.yes_ask_dollars || 0) > 0 && parseFloat(m.yes_ask_dollars || 0) < 1;
+        const isExpired = m.status === "closed" || (!hasActivePrice && exp && new Date(exp) < new Date());
         return {
           title: m.yes_sub_title || m.title || m.ticker,
           yesAsk: (parseFloat(m.yes_ask_dollars || 0) * 100).toFixed(1),
@@ -509,12 +558,9 @@ Kalshi: "${kalshiData?.eventTitle || ""}"
 Deadline: ${kalshiEnd}
 Rules: ${kalshiRes.slice(0, 400)}
 
-These are multi-outcome events. The rules shown are from one sub-market but the same structure applies to all outcomes. Ignore specific names/numbers in the rules.
+IMPORTANT: Both platforms have MULTIPLE outcomes (candidates/teams). The rules shown are from ONE sub-market but the same resolution structure applies to ALL outcomes on each platform. Do NOT say Kalshi is "binary for one specific candidate" — both platforms offer bets on each candidate separately.
 
-Answer these 3 simple questions:
-1. Are these the SAME bet? (same event, same resolution trigger)
-2. Are the deadlines the same or different?
-3. Are there any meaningful price differences worth noting?
+Rephrase the resolution criteria in your own words — do NOT copy raw rule text. Summarize the general resolution mechanism (e.g. "Resolves based on the official election result" not "Resolves to Yes only if [specific name]...").
 
 Do NOT invent any numbers. Do NOT mention volume or liquidity.
 
@@ -527,19 +573,20 @@ Respond ONLY in valid JSON:
     "comparison": "same deadline / X days apart / etc"
   },
   "resolution": {
-    "polymarket": "how it resolves in 1 sentence",
-    "kalshi": "how it resolves in 1 sentence",
-    "comparison": "identical / or 1 sentence explaining the difference"
+    "polymarket": "how it resolves in 1 clean sentence",
+    "kalshi": "how it resolves in 1 clean sentence",
+    "comparison": "identical / or 1 sentence explaining the key difference"
   },
-  "recommendation": "1-2 sentences. If identical: say they are the same bet, compare based on which has better price. If different: explain the key difference simply."
+  "recommendation": "1-2 sentences. If identical: say conditions are the same, pick the platform with the best price for each outcome. If different: explain the key difference simply."
 }`, 600);
 
       return result;
     } catch {
       return {
         conditionsIdentical: matchQuality === "exact",
-        deadlines: { polymarket: polyEnd, kalshi: kalshiEnd, comparison: "Could not analyze." },
-        resolution: { polymarket: polyRes.slice(0, 100), kalshi: kalshiRes.slice(0, 100), comparison: "Could not analyze." },
+        deadlines: { polymarket: polyEnd, kalshi: kalshiEnd, comparison: "Could not compare automatically." },
+        resolution: { polymarket: "Check resolution rules on Polymarket.", kalshi: "Check resolution rules on Kalshi.", comparison: "Verify rules on both platforms before trading." },
+        recommendation: "AI analysis unavailable. Please check resolution conditions manually on both platforms.",
       };
     }
   }
@@ -576,6 +623,9 @@ Respond ONLY in valid JSON:
       }}>
         <strong style={{ color: "var(--text-primary)" }}>Price differences usually reflect different resolution conditions</strong>: different deadlines, sources, or criteria.
         Always verify the resolution rules on both platforms before trading.
+        <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted)" }}>
+          Works best with popular markets (politics, sports). Some Polymarket bets may not exist on Kalshi. For best results, paste a Kalshi link — Polymarket has broader coverage, so matches are easier to find.
+        </div>
       </div>
 
       {/* Input */}
@@ -797,6 +847,60 @@ Respond ONLY in valid JSON:
             Always verify resolution conditions before trading. Platforms may have different deadlines or criteria.
           </div>
         </div>
+      )}
+
+      {/* Alpha Signals — Elite locked feature */}
+      {result && result.found && (
+        <div style={{ marginTop: 24 }}>
+          <ProPaywall
+            locked={!isElite}
+            requiredPlan="elite"
+            featureName="Alpha Signals"
+            onUpgrade={() => setShowPricing(true)}
+            blurAmount={5}
+          >
+            <div style={{
+              background: "var(--bg-deep)", border: "1px solid var(--border)",
+              padding: 24,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "#F5A623", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  Alpha Signals
+                </span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div style={{ background: "var(--bg-elevated)", padding: 16, border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Bot Activity</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--font-mono)", color: "#8B5CF6" }}>3 bots</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>bought YES in last 5 min</div>
+                </div>
+                <div style={{ background: "var(--bg-elevated)", padding: 16, border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Human Consensus</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--font-mono)", color: "#3B82F6" }}>72% YES</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>top 10 human forecasters</div>
+                </div>
+                <div style={{ background: "var(--bg-elevated)", padding: 16, border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Smart Money Flow</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--accent)" }}>+$24.5K</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>net inflow (last 1hr)</div>
+                </div>
+                <div style={{ background: "var(--bg-elevated)", padding: 16, border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Signal Strength</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--font-mono)", color: "#10B981" }}>Strong</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>bots &amp; humans agree</div>
+                </div>
+              </div>
+            </div>
+          </ProPaywall>
+        </div>
+      )}
+
+      {showPricing && (
+        <PricingModal
+          onClose={() => setShowPricing(false)}
+          currentPlan={plan}
+          onSelectPlan={(p) => { if (setPlan) setPlan(p); }}
+        />
       )}
     </div>
   );

@@ -11,6 +11,7 @@ import SignupPage from "./components/pages/SignupPage";
 import { ToastProvider } from "./components/shared/Toast";
 import BackgroundPaths from "./components/three/BackgroundPaths";
 import { supabase } from "./utils/supabase";
+import { usePlan } from "./utils/usePlan";
 
 const pathToTab = {
   "/wallet-stalker": "wallet-stalker",
@@ -41,6 +42,7 @@ export default function App() {
   const navigate = useNavigate();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [authReady, setAuthReady] = useState(false);
+  const { plan, setPlan, isPro, isElite } = usePlan();
 
   // Listen to Supabase auth state changes
   useEffect(() => {
@@ -116,7 +118,7 @@ export default function App() {
       {/* App content layer */}
       <div style={{ position: "relative", zIndex: 1 }}>
         {showHeader && (
-          <Header activeTab={activeTab} onTabChange={handleTabChange} onLogout={handleLogout} />
+          <Header activeTab={activeTab} onTabChange={handleTabChange} onLogout={handleLogout} plan={plan} onPlanChange={setPlan} />
         )}
 
         <main
@@ -143,13 +145,13 @@ export default function App() {
                   isLoggedIn ? <Navigate to="/wallet-stalker" replace /> : <SignupPage onLogin={handleLogin} />
                 } />
                 <Route path="/wallet-stalker" element={
-                  <ProtectedRoute isLoggedIn={isLoggedIn}><WalletStalker /></ProtectedRoute>
+                  <ProtectedRoute isLoggedIn={isLoggedIn}><WalletStalker plan={plan} onUpgrade={() => setPlan} setPlan={setPlan} /></ProtectedRoute>
                 } />
                 <Route path="/agent-tracker" element={
-                  <ProtectedRoute isLoggedIn={isLoggedIn}><AgentTracker /></ProtectedRoute>
+                  <ProtectedRoute isLoggedIn={isLoggedIn}><AgentTracker plan={plan} setPlan={setPlan} /></ProtectedRoute>
                 } />
                 <Route path="/arbitrage-scanner" element={
-                  <ProtectedRoute isLoggedIn={isLoggedIn}><ArbitrageScanner /></ProtectedRoute>
+                  <ProtectedRoute isLoggedIn={isLoggedIn}><ArbitrageScanner plan={plan} setPlan={setPlan} /></ProtectedRoute>
                 } />
               </Routes>
             </motion.div>

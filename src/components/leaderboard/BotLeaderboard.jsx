@@ -6,8 +6,10 @@ import {
   computeLeaderboardStats,
 } from "../../utils/leaderboardScoring";
 import { useToast } from "../shared/Toast";
+import ProPaywall from "../shared/ProPaywall";
+import PricingModal from "../shared/PricingModal";
 
-export default function BotLeaderboard() {
+export default function BotLeaderboard({ plan = "free", setPlan }) {
   const navigate = useNavigate();
   const addToast = useToast();
   const [traders, setTraders] = useState([]);
@@ -16,6 +18,10 @@ export default function BotLeaderboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, name: "" });
+  const [showPricing, setShowPricing] = useState(false);
+
+  const isPro = plan === "pro" || plan === "elite";
+  const FREE_LIMIT = 5; // Free users see top 5 only
 
   useEffect(() => {
     loadCached();
@@ -170,9 +176,22 @@ export default function BotLeaderboard() {
       {/* Leaderboard Table */}
       {traders.length > 0 && (
         <div style={{ background: "var(--bg-deep)", border: "1px solid var(--border)", borderRadius: 0, padding: 24 }}>
-          <h3 style={{ fontSize: 16, fontFamily: "var(--font-display)", fontWeight: 600, color: "var(--text-primary)", marginBottom: 16 }}>
-            Top 20 Traders
-          </h3>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <h3 style={{ fontSize: 16, fontFamily: "var(--font-display)", fontWeight: 600, color: "var(--text-primary)" }}>
+              Top {isPro ? traders.length : FREE_LIMIT} Traders
+              {!isPro && (
+                <span style={{
+                  marginLeft: 10, fontSize: 10, padding: "3px 8px",
+                  background: "rgba(45, 212, 168, 0.1)", color: "var(--accent)",
+                  fontFamily: "var(--font-mono)", fontWeight: 600,
+                  letterSpacing: "0.06em", textTransform: "uppercase",
+                  verticalAlign: "middle",
+                }}>
+                  {traders.length - FREE_LIMIT} more with Pro
+                </span>
+              )}
+            </h3>
+          </div>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
@@ -183,7 +202,7 @@ export default function BotLeaderboard() {
                 </tr>
               </thead>
               <tbody>
-                {traders.map((t, i) => (
+                {(isPro ? traders : traders.slice(0, FREE_LIMIT)).map((t, i) => (
                   <tr
                     key={t.wallet_address}
                     onClick={() => navigate(`/wallet-stalker?address=${t.wallet_address}`)}
@@ -246,7 +265,42 @@ export default function BotLeaderboard() {
               </tbody>
             </table>
           </div>
+
+          {/* Blurred remaining rows for free users */}
+          {!isPro && traders.length > FREE_LIMIT && (
+            <ProPaywall
+              locked={true}
+              requiredPlan="pro"
+              featureName="Full Leaderboard"
+              onUpgrade={() => setShowPricing(true)}
+              blurAmount={5}
+            >
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <tbody>
+                  {traders.slice(FREE_LIMIT, FREE_LIMIT + 6).map((t, i) => (
+                    <tr key={t.wallet_address} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={tdStyle}><span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-muted)" }}>{t.rank}</span></td>
+                      <td style={tdStyle}><span style={{ fontWeight: 500, fontSize: 13, color: "var(--text-primary)" }}>{t.display_name}</span></td>
+                      <td style={tdStyle}><span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{t.bot_score}</span></td>
+                      <td style={tdStyle}><span style={{ fontSize: 10, padding: "3px 8px", background: classBg(t.classification), color: classColor(t.classification), fontWeight: 600, fontFamily: "var(--font-mono)", textTransform: "uppercase" }}>{t.classification || "—"}</span></td>
+                      <td style={{ ...tdStyle, fontFamily: "var(--font-mono)" }}>{formatPnl(t.pnl)}</td>
+                      <td style={{ ...tdStyle, fontFamily: "var(--font-mono)" }}>{t.win_rate != null ? `${t.win_rate}%` : "N/A"}</td>
+                      <td style={{ ...tdStyle, fontFamily: "var(--font-mono)" }}>{t.trades_per_day}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ProPaywall>
+          )}
         </div>
+      )}
+
+      {showPricing && (
+        <PricingModal
+          onClose={() => setShowPricing(false)}
+          currentPlan={plan}
+          onSelectPlan={(p) => { if (setPlan) setPlan(p); }}
+        />
       )}
 
       {/* Bot vs Human Comparison */}

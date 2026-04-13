@@ -12,9 +12,11 @@ import CopyTradingSimulator from "./CopyTradingSimulator";
 import WalletTracker from "./WalletTracker";
 import ActivityHeatmap from "./ActivityHeatmap";
 import DataBadge from "../shared/DataBadge";
+import ProPaywall from "../shared/ProPaywall";
+import PricingModal from "../shared/PricingModal";
 
 
-export default function WalletStalker() {
+export default function WalletStalker({ plan = "free", setPlan }) {
   const [searchParams] = useSearchParams();
   const [address, setAddress] = useState("");
   const [loading, setLoading] = useState(false);
@@ -30,7 +32,9 @@ export default function WalletStalker() {
   const [positions, setPositions] = useState([]);
   const [marketResolutions, setMarketResolutions] = useState(new Map());
   const [resolutionsLoading, setResolutionsLoading] = useState(false);
+  const [showPricing, setShowPricing] = useState(false);
 
+  const isPro = plan === "pro" || plan === "elite";
   const lastAnalyzedRef = useRef("");
 
   useEffect(() => {
@@ -478,12 +482,20 @@ export default function WalletStalker() {
 
           {/* Copy Trading Simulator */}
           {!metrics?.insufficient && (
-            <CopyTradingSimulator
-              trades={trades}
-              traderName={traderName || "this trader"}
-              marketResolutions={marketResolutions}
-              resolutionsLoading={resolutionsLoading}
-            />
+            <ProPaywall
+              locked={!isPro}
+              requiredPlan="pro"
+              featureName="Copy Trading Simulator"
+              onUpgrade={() => setShowPricing(true)}
+              blurAmount={6}
+            >
+              <CopyTradingSimulator
+                trades={trades}
+                traderName={traderName || "this trader"}
+                marketResolutions={marketResolutions}
+                resolutionsLoading={resolutionsLoading}
+              />
+            </ProPaywall>
           )}
 
           {/* Track Wallet — always visible, even with 0 trades */}
@@ -713,6 +725,14 @@ export default function WalletStalker() {
             </div>
           )}
         </div>
+      )}
+
+      {showPricing && (
+        <PricingModal
+          onClose={() => setShowPricing(false)}
+          currentPlan={plan}
+          onSelectPlan={(p) => { if (setPlan) setPlan(p); }}
+        />
       )}
     </div>
   );

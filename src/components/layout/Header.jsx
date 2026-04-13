@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, ChevronDown, Menu, X } from "lucide-react";
+import { ArrowRight, ChevronDown, Menu, X, Crown } from "lucide-react";
 import { hasApiKey } from "../../utils/aiAgent";
 import ApiKeyModal from "../shared/ApiKeyModal";
+import PricingModal from "../shared/PricingModal";
 
 const tabs = [
   { id: "wallet-stalker", label: "Wallet Stalker", num: "01" },
@@ -12,9 +13,10 @@ const tabs = [
 
 const ACCENT = "#2DD4A8";
 
-export default function Header({ activeTab, onTabChange, onLogout }) {
+export default function Header({ activeTab, onTabChange, onLogout, plan, onPlanChange }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [showKeyModal, setShowKeyModal] = useState(false);
+  const [showPricing, setShowPricing] = useState(false);
   const [hasKey, setHasKey] = useState(hasApiKey());
   const menuRef = useRef(null);
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
@@ -196,8 +198,50 @@ export default function Header({ activeTab, onTabChange, onLogout }) {
           </AnimatePresence>
         </div>
 
-        {/* Right — API key + logout */}
+        {/* Right — Upgrade + API key + logout */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          {/* Upgrade button — only show on free plan */}
+          {(!plan || plan === "free") && (
+            <button
+              onClick={() => setShowPricing(true)}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "6px 14px",
+                background: "rgba(45, 212, 168, 0.08)",
+                border: "1px solid rgba(45, 212, 168, 0.3)",
+                borderRadius: 0,
+                color: ACCENT,
+                fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 600,
+                letterSpacing: "0.1em", textTransform: "uppercase",
+                cursor: "pointer", transition: "all 200ms var(--ease-out)",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(45, 212, 168, 0.14)"; e.currentTarget.style.borderColor = "rgba(45, 212, 168, 0.5)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(45, 212, 168, 0.08)"; e.currentTarget.style.borderColor = "rgba(45, 212, 168, 0.3)"; }}
+            >
+              <Crown size={12} />
+              Upgrade
+            </button>
+          )}
+          {/* Plan badge — show on pro/elite */}
+          {plan && plan !== "free" && (
+            <button
+              onClick={() => setShowPricing(true)}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "6px 14px",
+                background: plan === "elite" ? "rgba(245, 166, 35, 0.08)" : "rgba(45, 212, 168, 0.08)",
+                border: `1px solid ${plan === "elite" ? "rgba(245, 166, 35, 0.3)" : "rgba(45, 212, 168, 0.3)"}`,
+                borderRadius: 0,
+                color: plan === "elite" ? "#F5A623" : ACCENT,
+                fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 600,
+                letterSpacing: "0.1em", textTransform: "uppercase",
+                cursor: "pointer", transition: "all 200ms var(--ease-out)",
+              }}
+            >
+              <Crown size={12} />
+              {plan === "elite" ? "Elite" : "Pro"}
+            </button>
+          )}
           <button
             onClick={() => setShowKeyModal(true)}
             style={{
@@ -245,6 +289,14 @@ export default function Header({ activeTab, onTabChange, onLogout }) {
 
       {showKeyModal && (
         <ApiKeyModal onClose={() => setShowKeyModal(false)} onSave={() => setHasKey(hasApiKey())} />
+      )}
+
+      {showPricing && (
+        <PricingModal
+          onClose={() => setShowPricing(false)}
+          currentPlan={plan || "free"}
+          onSelectPlan={(p) => { if (onPlanChange) onPlanChange(p); }}
+        />
       )}
     </>
   );

@@ -7,6 +7,8 @@ import {
   fmtPnl, fmtRoi,
 } from "../../utils/agentTrackerEngine";
 import SpotlightCard from "../shared/SpotlightCard";
+import ProPaywall from "../shared/ProPaywall";
+import PricingModal from "../shared/PricingModal";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -123,7 +125,7 @@ function SortHeader({ col, label: lbl, sortBy, sortDir, onSort }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function AgentTracker() {
+export default function AgentTracker({ plan = "free", setPlan }) {
   const navigate = useNavigate();
 
   const [topN, setTopN] = useState(20);
@@ -136,7 +138,11 @@ export default function AgentTracker() {
   const [sortBy, setSortBy] = useState("pnl");
   const [sortDir, setSortDir] = useState("desc");
   const [error, setError] = useState(null);
-  const [scannedCategory, setScannedCategory] = useState(null); // tracks which category was last scanned
+  const [scannedCategory, setScannedCategory] = useState(null);
+  const [showPricing, setShowPricing] = useState(false);
+
+  const isPro = plan === "pro" || plan === "elite";
+  const FREE_TABLE_LIMIT = 5;
 
   // Load cache on mount
   useEffect(() => {
@@ -502,7 +508,7 @@ export default function AgentTracker() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedTraders.map((trader) => {
+                  {(isPro ? sortedTraders : sortedTraders.slice(0, FREE_TABLE_LIMIT)).map((trader) => {
                     const isBot = trader.classification === "Bot";
                     const clColor = isBot ? BOT_COLOR : HUMAN_COLOR;
                     const clBg = isBot ? BOT_DIM : HUMAN_DIM;
@@ -577,6 +583,37 @@ export default function AgentTracker() {
                 No traders found{category !== "OVERALL" ? ` in ${categoryLabel} markets` : ""}. Try scanning again or switching category.
               </div>
             )}
+            {/* Blurred remaining rows for free users */}
+            {!isPro && sortedTraders.length > FREE_TABLE_LIMIT && (
+              <ProPaywall
+                locked={true}
+                requiredPlan="pro"
+                featureName={`${sortedTraders.length - FREE_TABLE_LIMIT} More Traders`}
+                onUpgrade={() => setShowPricing(true)}
+                blurAmount={5}
+              >
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <tbody>
+                    {sortedTraders.slice(FREE_TABLE_LIMIT, FREE_TABLE_LIMIT + 5).map((trader) => {
+                      const isBot = trader.classification === "Bot";
+                      const clColor = isBot ? BOT_COLOR : HUMAN_COLOR;
+                      return (
+                        <tr key={trader.address} style={{ borderLeft: `3px solid ${clColor}` }}>
+                          <td style={{ padding: "10px 12px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{trader.rank ? `#${trader.rank}` : "—"}</td>
+                          <td style={{ padding: "10px 12px", fontWeight: 600, color: "var(--text-primary)" }}>{trader.userName || trader.address.slice(0, 10)}</td>
+                          <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", color: clColor }}>{trader.botScore}</td>
+                          <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", color: clColor }}>{trader.classification}</td>
+                          <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)" }}>{fmtPnl(trader.pnl)}</td>
+                          <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)" }}>{trader.tradesPerDay ? Math.round(trader.tradesPerDay) : "N/A"}</td>
+                          <td style={{ padding: "10px 12px" }}>{trader.primaryCategory}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </ProPaywall>
+            )}
+
             <div style={{
               marginTop: 12, fontSize: 11, color: "var(--text-ghost)", fontStyle: "italic",
             }}>
@@ -584,6 +621,14 @@ export default function AgentTracker() {
             </div>
           </div>
         </>
+      )}
+
+      {showPricing && (
+        <PricingModal
+          onClose={() => setShowPricing(false)}
+          currentPlan={plan}
+          onSelectPlan={(p) => { if (setPlan) setPlan(p); }}
+        />
       )}
     </div>
   );
