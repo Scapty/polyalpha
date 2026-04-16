@@ -836,8 +836,8 @@ Respond ONLY in valid JSON:
           </div>
 
           {/* Arbitrage Education */}
-          {result.matchQuality === "exact" && result.matchedOutcomes?.length > 0 && (
-            <ArbitrageEducation outcomes={result.matchedOutcomes} kalshiEndDate={result.kalshi?.endDate} conditionsDiffer={!result.analysis?.conditionsIdentical} />
+          {result.matchedOutcomes?.length > 0 && (
+            <ArbitrageEducation outcomes={result.matchedOutcomes} kalshiEndDate={result.kalshi?.endDate} conditionsDiffer={!result.analysis?.conditionsIdentical || result.matchQuality !== "exact"} />
           )}
 
           {/* AI Analysis */}
