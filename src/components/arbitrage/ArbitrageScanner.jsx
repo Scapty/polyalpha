@@ -849,51 +849,6 @@ Respond ONLY in valid JSON:
         </div>
       )}
 
-      {/* Alpha Signals — Elite locked feature */}
-      {result && result.found && (
-        <div style={{ marginTop: 24 }}>
-          <ProPaywall
-            locked={!isElite}
-            requiredPlan="elite"
-            featureName="Alpha Signals"
-            onUpgrade={() => setShowPricing(true)}
-            blurAmount={5}
-          >
-            <div style={{
-              background: "var(--bg-deep)", border: "1px solid var(--border)",
-              padding: 24,
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-                <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "#F5A623", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                  Alpha Signals
-                </span>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div style={{ background: "var(--bg-elevated)", padding: 16, border: "1px solid var(--border)" }}>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Bot Activity</div>
-                  <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--font-mono)", color: "#8B5CF6" }}>3 bots</div>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>bought YES in last 5 min</div>
-                </div>
-                <div style={{ background: "var(--bg-elevated)", padding: 16, border: "1px solid var(--border)" }}>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Human Consensus</div>
-                  <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--font-mono)", color: "#3B82F6" }}>72% YES</div>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>top 10 human forecasters</div>
-                </div>
-                <div style={{ background: "var(--bg-elevated)", padding: 16, border: "1px solid var(--border)" }}>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Smart Money Flow</div>
-                  <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--accent)" }}>+$24.5K</div>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>net inflow (last 1hr)</div>
-                </div>
-                <div style={{ background: "var(--bg-elevated)", padding: 16, border: "1px solid var(--border)" }}>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Signal Strength</div>
-                  <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--font-mono)", color: "#10B981" }}>Strong</div>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>bots &amp; humans agree</div>
-                </div>
-              </div>
-            </div>
-          </ProPaywall>
-        </div>
-      )}
 
       {showPricing && (
         <PricingModal
