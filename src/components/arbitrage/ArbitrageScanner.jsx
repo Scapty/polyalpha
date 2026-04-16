@@ -548,40 +548,24 @@ Respond ONLY in valid JSON:
     try {
       const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
-      const result = await claudeCall(apiKey, `You are comparing two prediction market bets. Today is ${today}.
+      const result = await claudeCall(apiKey, `Compare these two prediction market bets. Today: ${today}.
 
-Polymarket: "${polyData?.eventTitle || ""}"
+POLYMARKET: "${polyData?.eventTitle || ""}"
 Deadline: ${polyEnd}
-Rules: ${polyRes.slice(0, 400)}
+Rules: ${polyRes.slice(0, 300)}
 
-Kalshi: "${kalshiData?.eventTitle || ""}"
+KALSHI: "${kalshiData?.eventTitle || ""}"
 Deadline: ${kalshiEnd}
-Rules: ${kalshiRes.slice(0, 400)}
+Rules: ${kalshiRes.slice(0, 300)}
 
-IMPORTANT: Both platforms have MULTIPLE outcomes (candidates/teams). The rules shown are from ONE sub-market but the same resolution structure applies to ALL outcomes on each platform. Do NOT say Kalshi is "binary for one specific candidate" — both platforms offer bets on each candidate separately.
+Both platforms are multi-outcome (one sub-market per candidate/team). Rules shown are from one sub-market but apply to all. Summarize resolution in your own words, not raw rule text.
 
-Rephrase the resolution criteria in your own words — do NOT copy raw rule text. Summarize the general resolution mechanism (e.g. "Resolves based on the official election result" not "Resolves to Yes only if [specific name]...").
-
-Do NOT invent any numbers. Do NOT mention volume or liquidity.
-
-Respond ONLY in valid JSON:
-{
-  "conditionsIdentical": true or false,
-  "deadlines": {
-    "polymarket": "deadline in plain english",
-    "kalshi": "deadline in plain english",
-    "comparison": "same deadline / X days apart / etc"
-  },
-  "resolution": {
-    "polymarket": "how it resolves in 1 clean sentence",
-    "kalshi": "how it resolves in 1 clean sentence",
-    "comparison": "identical / or 1 sentence explaining the key difference"
-  },
-  "recommendation": "1-2 sentences. If identical: say conditions are the same, pick the platform with the best price for each outcome. If different: explain the key difference simply."
-}`, 600);
+Return ONLY this JSON, no other text:
+{"conditionsIdentical":true or false,"deadlines":{"polymarket":"deadline plain english","kalshi":"deadline plain english","comparison":"same or difference"},"resolution":{"polymarket":"1 sentence","kalshi":"1 sentence","comparison":"identical or difference"},"recommendation":"1-2 sentences advice"}`, 800);
 
       return result;
-    } catch {
+    } catch (err) {
+      console.error("Condition Analysis failed:", err);
       return {
         conditionsIdentical: matchQuality === "exact",
         deadlines: { polymarket: polyEnd, kalshi: kalshiEnd, comparison: "Could not compare automatically." },
@@ -599,11 +583,16 @@ Respond ONLY in valid JSON:
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(`Claude API error: ${res.status}`);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
+      throw new Error(`Claude API error: ${res.status} ${errBody.slice(0, 200)}`);
+    }
     const data = await res.json();
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error("AI did not return valid JSON.");
+    // Try to extract JSON from response — handle markdown code blocks too
+    const cleaned = text.replace(/```json\s*/g, "").replace(/```\s*/g, "");
+    const m = cleaned.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error("AI did not return valid JSON. Response: " + text.slice(0, 200));
     return JSON.parse(m[0]);
   }
 
